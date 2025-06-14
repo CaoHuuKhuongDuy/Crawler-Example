@@ -12,6 +12,59 @@ A focused web crawler specifically designed to fetch news articles from The Guar
 - **Beautiful JSON Output**: Clean, formatted JSON files with proper indentation and alphabetical key ordering
 - **Asynchronous Processing**: Fast, concurrent crawling for optimal performance
 
+## Getting Started
+
+### Prerequisites
+
+- **Java 11 or higher** - Required runtime environment
+- **Maven 3.6 or higher** - For building and dependency management
+
+### Installation & Build
+
+1. **Clone or download the project**
+   ```bash
+   # If using git
+   git clone <repository-url>
+   cd crawler
+   
+   # Or extract if downloaded as ZIP
+   ```
+
+2. **Build the project**
+   ```bash
+   # Clean and compile
+   mvn clean compile
+   
+   # Or build with tests (optional)
+   mvn clean test compile
+   ```
+
+3. **Verify build**
+   ```bash
+   # Check if compilation was successful
+   mvn exec:java -Dexec.mainClass="com.webcrawler.SimpleCrawler"
+   ```
+
+### Running the Crawler
+
+#### Method 1: Using Maven (Recommended)
+```bash
+# Basic run with default settings (June 2025, all sections, max 200 articles)
+mvn exec:java -Dexec.mainClass="com.webcrawler.SimpleCrawler"
+
+# With custom parameters
+mvn exec:java -Dexec.mainClass="com.webcrawler.SimpleCrawler" -Dexec.args="--from 2024-01-01 --to 2024-12-31"
+```
+
+#### Method 2: Building JAR (Optional)
+```bash
+# Build executable JAR
+mvn clean package
+
+# Run the JAR
+java -jar target/crawler-1.0-SNAPSHOT.jar --from 2024-01-01 --to 2024-12-31
+```
+
 ## Quick Start
 
 ```bash
