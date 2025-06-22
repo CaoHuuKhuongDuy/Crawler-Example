@@ -1,6 +1,6 @@
-/Users/cao.huukhuongduy/Documents/Code/shu/crawler/src/main/java/com/webcrawler/CrawlerApp.java
-/Users/cao.huukhuongduy/Documents/Code/shu/crawler/src/main/java/com/webcrawler/core/ApiCrawler.java
-/Users/cao.huukhuongduy/Documents/Code/shu/crawler/src/main/java/com/webcrawler/storage/JsonFileStorage.java
-/Users/cao.huukhuongduy/Documents/Code/shu/crawler/src/main/java/com/webcrawler/storage/CrawlDataStorage.java
-/Users/cao.huukhuongduy/Documents/Code/shu/crawler/src/main/java/com/webcrawler/SimpleCrawler.java
-/Users/cao.huukhuongduy/Documents/Code/shu/crawler/src/main/java/com/webcrawler/model/CrawlResult.java
+E:\AHundredTaste\Crawler-Example\src\main\java\com\webcrawler\core\ApiCrawler.java
+E:\AHundredTaste\Crawler-Example\src\main\java\com\webcrawler\storage\CrawlDataStorage.java
+E:\AHundredTaste\Crawler-Example\src\main\java\com\webcrawler\model\CrawlResult.java
+E:\AHundredTaste\Crawler-Example\src\main\java\com\webcrawler\SimpleCrawler.java
+E:\AHundredTaste\Crawler-Example\src\main\java\com\webcrawler\CrawlerApp.java
+E:\AHundredTaste\Crawler-Example\src\main\java\com\webcrawler\storage\JsonFileStorage.java

@@ -6,6 +6,7 @@ import com.webcrawler.storage.JsonFileStorage;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.time.LocalDate;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
 
@@ -82,7 +83,7 @@ public class SimpleCrawler {
             System.out.println("📰 Crawling Guardian news from " + fromDate + " to " + toDate + "...\n");
         }
         
-        List<String> newsUrls = getGuardianUrls(fromDate, toDate, section, pageSize);
+        List<String> newsUrls = getGuardianUrlsPartitioned(fromDate, toDate, section, pageSize);
         
         // Crawl asynchronously for better performance
         CompletableFuture<Map<String, CrawlResult>> future = crawler.crawlAsync(newsUrls);
@@ -114,12 +115,8 @@ public class SimpleCrawler {
             }
             
             // Save all results to a Guardian-specific file
-            String filename;
-            if (section != null && !section.trim().isEmpty()) {
-                filename = "guardian_" + section.trim().toLowerCase() + "_news_" + fromDate + "_to_" + toDate + ".json";
-            } else {
-                filename = "guardian_news_" + fromDate + "_to_" + toDate + ".json";
-            }
+            String uniqueId = UUID.randomUUID().toString();
+            String filename = "guardian_news_" + fromDate + "_to_" + toDate + "_" + uniqueId + ".json";
             storage.saveAllToSingleFile(allResults, filename);
             
             printSummary(allResults);
@@ -129,7 +126,7 @@ public class SimpleCrawler {
             System.err.println("Error running news crawls: " + e.getMessage());
         }
     }
-    
+
     private static List<String> getGuardianUrls(String fromDate, String toDate, String section, int pageSize) {
         StringBuilder urlBuilder = new StringBuilder();
         urlBuilder.append("https://content.guardianapis.com/search?from-date=")
@@ -140,13 +137,41 @@ public class SimpleCrawler {
                   .append("&page-size=")
                   .append(pageSize)
                   .append("&api-key=test");
-        
+
         // Add section filter if specified
         if (section != null && !section.trim().isEmpty()) {
             urlBuilder.append("&section=").append(section.trim().toLowerCase());
         }
-        
+
         return Arrays.asList(urlBuilder.toString());
+    }
+
+    private static List<String> getGuardianUrlsPartitioned(String fromDate, String toDate, String section, int pageSize) {
+        List<String> urls = new ArrayList<>();
+        LocalDate start = LocalDate.parse(fromDate);
+        LocalDate end = LocalDate.parse(toDate);
+        for (LocalDate date = start; !date.isAfter(end); date = date.plusDays(1)) {
+            urls.add(buildGuardianUrl(date.toString(), date.toString(), section, pageSize));
+        }
+        return urls;
+    }
+
+    // In SimpleCrawler.java, update buildGuardianUrl and getGuardianUrlsPartitioned:
+    private static String buildGuardianUrl(String from, String to, String section, int pageSize) {
+        String apiKey = System.getenv().getOrDefault("GUARDIAN_API_KEY", "test");
+        StringBuilder urlBuilder = new StringBuilder();
+        urlBuilder.append("https://content.guardianapis.com/search?from-date=")
+                .append(from)
+                .append("&to-date=")
+                .append(to)
+                .append("&show-fields=headline,byline,body,thumbnail")
+                .append("&page-size=")
+                .append(pageSize)
+                .append("&api-key=").append(apiKey);
+        if (section != null && !section.trim().isEmpty()) {
+            urlBuilder.append("&section=").append(section.trim().toLowerCase());
+        }
+        return urlBuilder.toString();
     }
     
     private static void showNewsData(CrawlResult result) {
