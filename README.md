@@ -10,7 +10,9 @@ A focused web crawler specifically designed to fetch news articles from The Guar
 - **Page Size Control**: Control the number of articles retrieved (1-200, default: 200 for maximum coverage)
 - **Rich Content**: Retrieves headlines, bylines, full article body, thumbnails, and metadata
 - **Beautiful JSON Output**: Clean, formatted JSON files with proper indentation and alphabetical key ordering
-- **Asynchronous Processing**: Fast, concurrent crawling for optimal performance
+- **🚀 Multithreaded Architecture**: Configurable thread pool for concurrent crawling (scalable from 1-N threads)
+- **🛡️ Fault Tolerance**: Automatic retry with exponential backoff for resilient data collection
+- **⚡ Smart Rate Limiting**: Configurable delays to respect API limits and avoid overwhelming servers
 
 ## Getting Started
 
@@ -180,13 +182,67 @@ crawler/
 - **SLF4J + Logback**: Logging framework
 - **OkHttp**: HTTP client for API requests
 
+## 🏗️ Architecture & Performance
+
+### Multithreading & Scalability
+- **Thread Pool**: Configurable concurrent processing (default: 10 threads)
+- **Asynchronous Execution**: Non-blocking HTTP requests using `CompletableFuture`
+- **Parallel Processing**: Multiple URLs processed simultaneously for optimal performance
+- **Resource Management**: Proper thread pool lifecycle management with graceful shutdown
+
+### 🛡️ Fault Tolerance & Reliability
+- **Automatic Retry**: Failed requests are automatically retried up to 3 times (configurable)
+- **Exponential Backoff**: Smart retry delays that increase progressively (1s → 2s → 4s → 8s...)
+- **Intelligent Retry Logic**: Only retries on temporary failures (5xx errors, timeouts, rate limits)
+- **Network Resilience**: Handles connection timeouts, resets, and other transient network issues
+
+#### Retryable Conditions
+- **HTTP Status Codes**: `500`, `502`, `503`, `504`, `429` (rate limiting), `408` (timeout)
+- **Network Errors**: Connection timeouts, connection refused, network unreachable
+- **Server Overload**: Automatic backoff when servers are temporarily unavailable
+
+### ⚙️ Configurable Options
+
+#### CrawlerApp Advanced Options
+```bash
+# Configure threading and retry behavior
+java -jar crawler.jar --threads 20 --max-retries 5 --retry-delay 500 --backoff-multiplier 1.5
+
+# Conservative approach (more retries, longer delays)
+java -jar crawler.jar --threads 5 --max-retries 5 --retry-delay 2000
+
+# Aggressive approach (more threads, faster retries)
+java -jar crawler.jar --threads 25 --max-retries 2 --retry-delay 500
+```
+
+| Parameter | Description | Default | Example |
+|-----------|-------------|---------|---------|
+| `--threads` | Number of concurrent threads | 10 | `--threads 20` |
+| `--max-retries` | Maximum retry attempts | 3 | `--max-retries 5` |
+| `--retry-delay` | Base retry delay (ms) | 1000 | `--retry-delay 500` |
+| `--backoff-multiplier` | Exponential backoff multiplier | 2.0 | `--backoff-multiplier 1.5` |
+| `--rate-limit` | Delay between requests (ms) | 1000 | `--rate-limit 500` |
+
+### 📊 Retry Pattern Example
+```
+🔍 Crawling URL: https://content.guardianapis.com/search...
+⚠️ Retryable HTTP status 503 for URL: ... (attempt 1/4)
+Waiting 1000ms before retry attempt #2
+🔁 Retry attempt #2 for URL: ...
+⚠️ Retryable network error: connection timeout (attempt 2/4)
+Waiting 2000ms before retry attempt #3
+🔁 Retry attempt #3 for URL: ...
+✅ Successfully crawled URL: ... after 2 retries
+```
+
 ## Technical Details
 
 - **API Limit**: Guardian API allows maximum 200 articles per request
 - **Default Behavior**: Retrieves maximum available articles (200) by default
-- **Concurrent Processing**: Uses asynchronous HTTP requests for better performance
+- **HTTP Client**: Java 11+ native HTTP client with 30-second request timeout
 - **Error Handling**: Comprehensive error handling with detailed logging
 - **JSON Formatting**: Beautiful output with proper indentation and alphabetical key ordering
+- **Memory Efficient**: Streaming JSON processing for large datasets
 
 ## Examples
 

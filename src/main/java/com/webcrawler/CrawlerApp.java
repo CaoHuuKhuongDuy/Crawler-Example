@@ -35,10 +35,20 @@ public class CrawlerApp {
             int threadPoolSize = Integer.parseInt(cmd.getOptionValue("threads", "10"));
             long rateLimitMs = Long.parseLong(cmd.getOptionValue("rate-limit", "1000"));
             String userAgent = cmd.getOptionValue("user-agent", "ApiWebCrawler/1.0");
+            int maxRetries = Integer.parseInt(cmd.getOptionValue("max-retries", "3"));
+            long baseRetryDelayMs = Long.parseLong(cmd.getOptionValue("retry-delay", "1000"));
+            double backoffMultiplier = Double.parseDouble(cmd.getOptionValue("backoff-multiplier", "2.0"));
             
             // Initialize crawler and storage
-            ApiCrawler crawler = new ApiCrawler(threadPoolSize, rateLimitMs);
+            ApiCrawler crawler = new ApiCrawler(threadPoolSize, rateLimitMs, maxRetries, baseRetryDelayMs, backoffMultiplier);
             crawler.setUserAgent(userAgent);
+            
+            // Show retry configuration
+            System.out.println("🔧 Retry Configuration:");
+            System.out.println("   Max retries: " + crawler.getMaxRetries());
+            System.out.println("   Base retry delay: " + crawler.getBaseRetryDelayMs() + "ms");
+            System.out.println("   Backoff multiplier: " + crawler.getBackoffMultiplier() + "x");
+            System.out.println();
             
             CrawlDataStorage storage = new CrawlDataStorage();
             
@@ -110,6 +120,24 @@ public class CrawlerApp {
                 .longOpt("user-agent")
                 .hasArg()
                 .desc("User agent string (default: ApiWebCrawler/1.0)")
+                .build());
+                
+        options.addOption(Option.builder()
+                .longOpt("max-retries")
+                .hasArg()
+                .desc("Maximum number of retry attempts (default: 3)")
+                .build());
+                
+        options.addOption(Option.builder()
+                .longOpt("retry-delay")
+                .hasArg()
+                .desc("Base retry delay in milliseconds (default: 1000)")
+                .build());
+                
+        options.addOption(Option.builder()
+                .longOpt("backoff-multiplier")
+                .hasArg()
+                .desc("Exponential backoff multiplier (default: 2.0)")
                 .build());
                 
         return options;
