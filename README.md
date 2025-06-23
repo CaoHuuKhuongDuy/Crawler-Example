@@ -195,11 +195,23 @@ crawler/
 - **Exponential Backoff**: Smart retry delays that increase progressively (1s → 2s → 4s → 8s...)
 - **Intelligent Retry Logic**: Only retries on temporary failures (5xx errors, timeouts, rate limits)
 - **Network Resilience**: Handles connection timeouts, resets, and other transient network issues
+- **🧵 Thread-Level Fault Tolerance**: Automatic thread replacement when threads die or crash
+- **🔍 Real-Time Thread Monitoring**: Health checks every 30 seconds with proactive recovery
+- **💾 Memory Error Recovery**: Handles OutOfMemoryError and JVM crashes gracefully
+- **📊 Thread Pool Analytics**: Comprehensive statistics and health metrics
 
 #### Retryable Conditions
 - **HTTP Status Codes**: `500`, `502`, `503`, `504`, `429` (rate limiting), `408` (timeout)
 - **Network Errors**: Connection timeouts, connection refused, network unreachable
 - **Server Overload**: Automatic backoff when servers are temporarily unavailable
+
+#### Thread Fault Tolerance
+- **Thread Death Detection**: Monitors for threads killed by OutOfMemoryError, JVM errors, or exceptions
+- **Automatic Replacement**: Dead threads are automatically replaced to maintain pool size
+- **Health Monitoring**: Periodic health checks (every 30 seconds) with automated recovery
+- **Fallback Threads**: Creates emergency threads when main pool is overwhelmed
+- **Pool Recovery**: Automatically restarts core threads if pool size degrades
+- **Exception Handling**: Comprehensive uncaught exception handling with logging
 
 ### ⚙️ Configurable Options
 
@@ -235,6 +247,23 @@ Waiting 2000ms before retry attempt #3
 ✅ Successfully crawled URL: ... after 2 retries
 ```
 
+### 🧵 Thread Monitoring Example
+```
+✨ Created new thread: robust-crawler-thread-1
+🔍 Thread Pool Health Check:
+   Active threads: 8/10
+   Core pool size: 10
+   Completed tasks: 245
+   Queue size: 2
+   Threads created: 10
+   Threads replaced: 0
+🚨 CRITICAL: Thread died due to OutOfMemoryError! Thread: robust-crawler-thread-5
+⚠️ Thread pool size (9) is below core size (10). Some threads may have died.
+🔄 Attempted to restart core threads
+✨ Created new thread: robust-crawler-thread-11
+📊 Final Thread Pool Stats: {activeThreads=0, completedTasks=156, threadsReplaced=1}
+```
+
 ## Technical Details
 
 - **API Limit**: Guardian API allows maximum 200 articles per request
@@ -243,6 +272,9 @@ Waiting 2000ms before retry attempt #3
 - **Error Handling**: Comprehensive error handling with detailed logging
 - **JSON Formatting**: Beautiful output with proper indentation and alphabetical key ordering
 - **Memory Efficient**: Streaming JSON processing for large datasets
+- **Thread Safety**: Thread-safe operations with robust concurrent data structures
+- **Monitoring**: Real-time thread pool health monitoring with automatic recovery
+- **Resilience**: Multi-layered fault tolerance from network to JVM level
 
 ## Examples
 
@@ -261,9 +293,33 @@ mvn exec:java -Dexec.mainClass="com.webcrawler.SimpleCrawler" -Dexec.args="--sec
 mvn exec:java -Dexec.mainClass="com.webcrawler.SimpleCrawler" -Dexec.args="--from 2024-11-15 --to 2024-11-15"
 ```
 
+### Test Thread Fault Tolerance
+```bash
+# Run with thread monitoring enabled (shows thread health in logs)
+mvn exec:java -Dexec.mainClass="com.webcrawler.CrawlerApp" -Dexec.args="--examples --threads 5"
+
+# Run with enhanced retry and thread monitoring
+mvn exec:java -Dexec.mainClass="com.webcrawler.CrawlerApp" -Dexec.args="--examples --threads 10 --max-retries 5"
+```
+
+## 🔧 Fault Tolerance Features Summary
+
+| Feature | Description | Benefit |
+|---------|-------------|---------|
+| **Automatic Retry** | 3 retry attempts with exponential backoff | Handles temporary network/server issues |
+| **Thread Replacement** | Dead threads automatically replaced | Maintains pool size during errors |
+| **Health Monitoring** | 30-second health checks | Proactive issue detection |
+| **Memory Recovery** | OutOfMemoryError handling | Survives memory pressure |
+| **Fallback Threads** | Emergency threads for overload | Prevents complete failure |
+| **Pool Recovery** | Automatic core thread restart | Restores degraded performance |
+| **Smart Retries** | Only retries on retryable errors | Avoids wasted attempts |
+| **Exception Logging** | Detailed error tracking | Easy debugging and monitoring |
+
 ## Notes
 
 - The Guardian API requires an API key for production use (currently using test key)
 - Date ranges with many articles may hit the 200-article limit per request
 - For comprehensive coverage of large date ranges, consider breaking them into smaller chunks
-- All times are in UTC as provided by The Guardian API 
+- All times are in UTC as provided by The Guardian API
+- Thread monitoring logs are available at DEBUG level for detailed diagnostics
+- Thread pool statistics are logged at shutdown for performance analysis

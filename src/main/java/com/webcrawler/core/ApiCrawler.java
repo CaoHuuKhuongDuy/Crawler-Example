@@ -21,7 +21,11 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.ScheduledExecutorService;
 
 /**
  * Main API crawler class that handles HTTP requests to APIs with fault tolerance
@@ -32,10 +36,17 @@ public class ApiCrawler {
     
     private final HttpClient httpClient;
     private final ObjectMapper objectMapper;
-    private final ExecutorService executorService;
+    private final ThreadPoolExecutor executorService;
+    private final ScheduledExecutorService monitoringService;
     private final Map<String, String> defaultHeaders;
     private final AtomicLong requestCount;
     private final long rateLimitDelayMs;
+    
+    // Thread monitoring
+    private final AtomicInteger threadsCreated;
+    private final AtomicInteger threadsReplaced;
+    private final AtomicLong lastHealthCheck;
+    private final int originalThreadPoolSize;
     
     // Retry configuration
     private final int maxRetries;
@@ -51,18 +62,26 @@ public class ApiCrawler {
                 .connectTimeout(Duration.ofSeconds(10))
                 .build();
         this.objectMapper = new ObjectMapper();
-        this.executorService = Executors.newFixedThreadPool(10);
+        this.originalThreadPoolSize = 10;
+        this.executorService = createRobustThreadPool(originalThreadPoolSize);
+        this.monitoringService = Executors.newScheduledThreadPool(1, new MonitoringThreadFactory());
         this.defaultHeaders = new HashMap<>();
         this.requestCount = new AtomicLong(0);
-        this.rateLimitDelayMs = 1000; // 1 second between requests
+        this.rateLimitDelayMs = 1000;
+        
+        // Thread monitoring
+        this.threadsCreated = new AtomicInteger(originalThreadPoolSize);
+        this.threadsReplaced = new AtomicInteger(0);
+        this.lastHealthCheck = new AtomicLong(System.currentTimeMillis());
         
         // Default retry configuration
         this.maxRetries = 3;
-        this.baseRetryDelayMs = 1000; // Start with 1 second
-        this.backoffMultiplier = 2.0; // Double the delay each retry
+        this.baseRetryDelayMs = 1000;
+        this.backoffMultiplier = 2.0;
         this.retryableStatusCodes = initializeRetryableStatusCodes();
         
         initializeDefaultHeaders();
+        startThreadPoolMonitoring();
     }
     
     public ApiCrawler(int threadPoolSize, long rateLimitDelayMs) {
@@ -74,10 +93,17 @@ public class ApiCrawler {
                 .connectTimeout(Duration.ofSeconds(10))
                 .build();
         this.objectMapper = new ObjectMapper();
-        this.executorService = Executors.newFixedThreadPool(threadPoolSize);
+        this.originalThreadPoolSize = threadPoolSize;
+        this.executorService = createRobustThreadPool(threadPoolSize);
+        this.monitoringService = Executors.newScheduledThreadPool(1, new MonitoringThreadFactory());
         this.defaultHeaders = new HashMap<>();
         this.requestCount = new AtomicLong(0);
         this.rateLimitDelayMs = rateLimitDelayMs;
+        
+        // Thread monitoring
+        this.threadsCreated = new AtomicInteger(threadPoolSize);
+        this.threadsReplaced = new AtomicInteger(0);
+        this.lastHealthCheck = new AtomicLong(System.currentTimeMillis());
         
         // Retry configuration
         this.maxRetries = maxRetries;
@@ -86,6 +112,7 @@ public class ApiCrawler {
         this.retryableStatusCodes = initializeRetryableStatusCodes();
         
         initializeDefaultHeaders();
+        startThreadPoolMonitoring();
     }
     
     private Set<Integer> initializeRetryableStatusCodes() {
@@ -543,14 +570,189 @@ public class ApiCrawler {
     }
     
     public void shutdown() {
+        logger.info("🔄 Shutting down crawler thread pools...");
+        
+        // Log final thread pool statistics
+        Map<String, Object> finalStats = getThreadPoolStats();
+        logger.info("📊 Final Thread Pool Stats: {}", finalStats);
+        
         try {
+            // Shutdown monitoring service first
+            monitoringService.shutdown();
+            if (!monitoringService.awaitTermination(5, TimeUnit.SECONDS)) {
+                monitoringService.shutdownNow();
+                logger.warn("⚠️ Monitoring service forced shutdown");
+            }
+            
+            // Shutdown main executor service
             executorService.shutdown();
             if (!executorService.awaitTermination(60, TimeUnit.SECONDS)) {
+                logger.warn("⚠️ Thread pool did not terminate gracefully, forcing shutdown");
                 executorService.shutdownNow();
+                
+                // Wait a bit more for forced shutdown
+                if (!executorService.awaitTermination(10, TimeUnit.SECONDS)) {
+                    logger.error("❌ Thread pool did not terminate after forced shutdown");
+                }
             }
+            
+            logger.info("✅ All thread pools shut down successfully");
+            
         } catch (InterruptedException e) {
+            logger.warn("🚨 Shutdown interrupted, forcing immediate termination");
+            monitoringService.shutdownNow();
             executorService.shutdownNow();
             Thread.currentThread().interrupt();
         }
+    }
+    
+    /**
+     * Create a robust thread pool with custom thread factory for monitoring
+     */
+    private ThreadPoolExecutor createRobustThreadPool(int threadPoolSize) {
+        ThreadPoolExecutor executor = (ThreadPoolExecutor) Executors.newFixedThreadPool(
+            threadPoolSize, 
+            new RobustThreadFactory()
+        );
+        
+        // Enable thread replacement and monitoring
+        executor.setRejectedExecutionHandler((runnable, exec) -> {
+            logger.error("🚨 Task rejected! Thread pool may be overwhelmed. Active threads: {}, Queue size: {}", 
+                        exec.getActiveCount(), exec.getQueue().size());
+            
+            // Try to execute in a new thread as fallback
+            try {
+                Thread fallbackThread = new Thread(runnable, "fallback-crawler-thread");
+                fallbackThread.setDaemon(true);
+                fallbackThread.start();
+                threadsReplaced.incrementAndGet();
+                logger.warn("⚡ Created fallback thread for rejected task");
+            } catch (Exception e) {
+                logger.error("❌ Failed to create fallback thread: {}", e.getMessage());
+                throw new RuntimeException("Thread pool exhausted and fallback failed", e);
+            }
+        });
+        
+        return executor;
+    }
+    
+    /**
+     * Custom thread factory that monitors thread lifecycle
+     */
+    private class RobustThreadFactory implements ThreadFactory {
+        private final AtomicInteger threadNumber = new AtomicInteger(1);
+        
+        @Override
+        public Thread newThread(Runnable runnable) {
+            Thread thread = new Thread(() -> {
+                try {
+                    runnable.run();
+                } catch (OutOfMemoryError e) {
+                    logger.error("🚨 CRITICAL: Thread died due to OutOfMemoryError! Thread: {}", Thread.currentThread().getName());
+                    threadsReplaced.incrementAndGet();
+                    throw e;
+                } catch (Error e) {
+                    logger.error("🚨 CRITICAL: Thread died due to JVM Error: {} - Thread: {}", e.getMessage(), Thread.currentThread().getName());
+                    threadsReplaced.incrementAndGet();
+                    throw e;
+                } catch (Exception e) {
+                    logger.warn("⚠️ Thread completed with exception: {} - Thread: {}", e.getMessage(), Thread.currentThread().getName());
+                    // Exception in task - thread will be replaced automatically by ThreadPoolExecutor
+                }
+            }, "robust-crawler-thread-" + threadNumber.getAndIncrement());
+            
+            thread.setDaemon(false); // Ensure main threads are not daemon
+            thread.setUncaughtExceptionHandler((t, e) -> {
+                logger.error("🚨 Uncaught exception in thread {}: {}", t.getName(), e.getMessage(), e);
+                threadsReplaced.incrementAndGet();
+            });
+            
+            logger.debug("✨ Created new thread: {}", thread.getName());
+            return thread;
+        }
+    }
+    
+    /**
+     * Monitoring thread factory
+     */
+    private class MonitoringThreadFactory implements ThreadFactory {
+        @Override
+        public Thread newThread(Runnable r) {
+            Thread thread = new Thread(r, "thread-pool-monitor");
+            thread.setDaemon(true);
+            return thread;
+        }
+    }
+    
+    /**
+     * Start monitoring thread pool health
+     */
+    private void startThreadPoolMonitoring() {
+        monitoringService.scheduleAtFixedRate(() -> {
+            try {
+                checkThreadPoolHealth();
+            } catch (Exception e) {
+                logger.error("Error in thread pool monitoring: {}", e.getMessage());
+            }
+        }, 30, 30, TimeUnit.SECONDS); // Check every 30 seconds
+    }
+    
+    /**
+     * Monitor thread pool health and take corrective action
+     */
+    private void checkThreadPoolHealth() {
+        lastHealthCheck.set(System.currentTimeMillis());
+        
+        int activeThreads = executorService.getActiveCount();
+        int poolSize = executorService.getPoolSize();
+        int corePoolSize = executorService.getCorePoolSize();
+        long completedTasks = executorService.getCompletedTaskCount();
+        int queueSize = executorService.getQueue().size();
+        
+        logger.debug("🔍 Thread Pool Health Check:");
+        logger.debug("   Active threads: {}/{}", activeThreads, poolSize);
+        logger.debug("   Core pool size: {}", corePoolSize);
+        logger.debug("   Completed tasks: {}", completedTasks);
+        logger.debug("   Queue size: {}", queueSize);
+        logger.debug("   Threads created: {}", threadsCreated.get());
+        logger.debug("   Threads replaced: {}", threadsReplaced.get());
+        
+        // Check if thread pool is unhealthy
+        if (poolSize < corePoolSize) {
+            logger.warn("⚠️ Thread pool size ({}) is below core size ({}). Some threads may have died.", 
+                       poolSize, corePoolSize);
+            
+            // Force thread pool to restore to core size
+            executorService.prestartAllCoreThreads();
+            logger.info("🔄 Attempted to restart core threads");
+        }
+        
+        // Alert if queue is growing too large
+        if (queueSize > 100) {
+            logger.warn("⚠️ Thread pool queue is large ({}). Consider increasing thread pool size or reducing load.", queueSize);
+        }
+        
+        // Alert on high thread replacement rate
+        int replacementRate = threadsReplaced.get();
+        if (replacementRate > originalThreadPoolSize * 2) {
+            logger.warn("🚨 High thread replacement rate detected ({}). Check for memory leaks or thread-killing errors.", replacementRate);
+        }
+    }
+    
+    /**
+     * Get thread pool health statistics
+     */
+    public Map<String, Object> getThreadPoolStats() {
+        Map<String, Object> stats = new HashMap<>();
+        stats.put("activeThreads", executorService.getActiveCount());
+        stats.put("poolSize", executorService.getPoolSize());
+        stats.put("corePoolSize", executorService.getCorePoolSize());
+        stats.put("completedTasks", executorService.getCompletedTaskCount());
+        stats.put("queueSize", executorService.getQueue().size());
+        stats.put("threadsCreated", threadsCreated.get());
+        stats.put("threadsReplaced", threadsReplaced.get());
+        stats.put("lastHealthCheck", new java.util.Date(lastHealthCheck.get()));
+        stats.put("isHealthy", executorService.getPoolSize() >= executorService.getCorePoolSize());
+        return stats;
     }
 } 
