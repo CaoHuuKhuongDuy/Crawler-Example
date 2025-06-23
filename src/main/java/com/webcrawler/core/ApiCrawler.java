@@ -17,6 +17,8 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.Set;
 import java.util.HashSet;
+import java.util.List;
+import java.util.ArrayList;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -26,21 +28,31 @@ import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ForkJoinPool;
+import java.util.stream.IntStream;
 
 /**
- * Main API crawler class that handles HTTP requests to APIs with fault tolerance
+ * Main API crawler class with advanced scalability and concurrency features
  */
 public class ApiCrawler {
     
     private static final Logger logger = LoggerFactory.getLogger(ApiCrawler.class);
     
     private final HttpClient httpClient;
+    private final HttpClient http2Client; // Dedicated HTTP/2 client
     private final ObjectMapper objectMapper;
     private final ThreadPoolExecutor executorService;
+    private final ForkJoinPool processingPool; // For parallel response processing
     private final ScheduledExecutorService monitoringService;
     private final Map<String, String> defaultHeaders;
     private final AtomicLong requestCount;
     private final long rateLimitDelayMs;
+    
+    // Advanced scalability settings
+    private final int maxConnectionsPerHost;
+    private final boolean enableHttp2;
+    private final boolean enableConcurrentProcessing;
+    private final int processingParallelism;
     
     // Thread monitoring
     private final AtomicInteger threadsCreated;
@@ -58,61 +70,76 @@ public class ApiCrawler {
     private String userAgent = "ApiWebCrawler/1.0";
     
     public ApiCrawler() {
-        this.httpClient = HttpClient.newBuilder()
-                .connectTimeout(Duration.ofSeconds(10))
-                .build();
-        this.objectMapper = new ObjectMapper();
-        this.originalThreadPoolSize = 10;
-        this.executorService = createRobustThreadPool(originalThreadPoolSize);
-        this.monitoringService = Executors.newScheduledThreadPool(1, new MonitoringThreadFactory());
-        this.defaultHeaders = new HashMap<>();
-        this.requestCount = new AtomicLong(0);
-        this.rateLimitDelayMs = 1000;
-        
-        // Thread monitoring
-        this.threadsCreated = new AtomicInteger(originalThreadPoolSize);
-        this.threadsReplaced = new AtomicInteger(0);
-        this.lastHealthCheck = new AtomicLong(System.currentTimeMillis());
-        
-        // Default retry configuration
-        this.maxRetries = 3;
-        this.baseRetryDelayMs = 1000;
-        this.backoffMultiplier = 2.0;
-        this.retryableStatusCodes = initializeRetryableStatusCodes();
-        
-        initializeDefaultHeaders();
-        startThreadPoolMonitoring();
+        this(10, 1000, 3, 1000, 2.0, true, true, 4);
     }
     
     public ApiCrawler(int threadPoolSize, long rateLimitDelayMs) {
-        this(threadPoolSize, rateLimitDelayMs, 3, 1000, 2.0);
+        this(threadPoolSize, rateLimitDelayMs, 3, 1000, 2.0, true, true, 4);
     }
     
     public ApiCrawler(int threadPoolSize, long rateLimitDelayMs, int maxRetries, long baseRetryDelayMs, double backoffMultiplier) {
-        this.httpClient = HttpClient.newBuilder()
-                .connectTimeout(Duration.ofSeconds(10))
-                .build();
-        this.objectMapper = new ObjectMapper();
+        this(threadPoolSize, rateLimitDelayMs, maxRetries, baseRetryDelayMs, backoffMultiplier, true, true, 4);
+    }
+    
+    public ApiCrawler(int threadPoolSize, long rateLimitDelayMs, int maxRetries, long baseRetryDelayMs, 
+                     double backoffMultiplier, boolean enableHttp2, boolean enableConcurrentProcessing, 
+                     int maxConnectionsPerHost) {
+        
         this.originalThreadPoolSize = threadPoolSize;
+        this.rateLimitDelayMs = rateLimitDelayMs;
+        this.maxRetries = maxRetries;
+        this.baseRetryDelayMs = baseRetryDelayMs;
+        this.backoffMultiplier = backoffMultiplier;
+        this.enableHttp2 = enableHttp2;
+        this.enableConcurrentProcessing = enableConcurrentProcessing;
+        this.maxConnectionsPerHost = maxConnectionsPerHost;
+        this.processingParallelism = Math.max(2, Runtime.getRuntime().availableProcessors());
+        
+        // Initialize HTTP clients with advanced features
+        this.httpClient = createAdvancedHttpClient(false);
+        this.http2Client = enableHttp2 ? createAdvancedHttpClient(true) : this.httpClient;
+        
+        this.objectMapper = new ObjectMapper();
         this.executorService = createRobustThreadPool(threadPoolSize);
+        this.processingPool = new ForkJoinPool(processingParallelism);
         this.monitoringService = Executors.newScheduledThreadPool(1, new MonitoringThreadFactory());
         this.defaultHeaders = new HashMap<>();
         this.requestCount = new AtomicLong(0);
-        this.rateLimitDelayMs = rateLimitDelayMs;
         
         // Thread monitoring
         this.threadsCreated = new AtomicInteger(threadPoolSize);
         this.threadsReplaced = new AtomicInteger(0);
         this.lastHealthCheck = new AtomicLong(System.currentTimeMillis());
         
-        // Retry configuration
-        this.maxRetries = maxRetries;
-        this.baseRetryDelayMs = baseRetryDelayMs;
-        this.backoffMultiplier = backoffMultiplier;
         this.retryableStatusCodes = initializeRetryableStatusCodes();
         
         initializeDefaultHeaders();
         startThreadPoolMonitoring();
+        
+        logger.info("🚀 Enhanced ApiCrawler initialized:");
+        logger.info("   Thread Pool Size: {}", threadPoolSize);
+        logger.info("   HTTP/2 Enabled: {}", enableHttp2);
+        logger.info("   Concurrent Processing: {}", enableConcurrentProcessing);
+        logger.info("   Max Connections per Host: {}", maxConnectionsPerHost);
+        logger.info("   Processing Parallelism: {}", processingParallelism);
+    }
+    
+    /**
+     * Create advanced HTTP client with connection pooling and HTTP/2 support
+     */
+    private HttpClient createAdvancedHttpClient(boolean forceHttp2) {
+        HttpClient.Builder builder = HttpClient.newBuilder()
+                .connectTimeout(Duration.ofSeconds(10))
+                .followRedirects(HttpClient.Redirect.NORMAL);
+        
+        if (forceHttp2) {
+            builder.version(HttpClient.Version.HTTP_2);
+            logger.info("🔄 HTTP/2 client created for enhanced multiplexing");
+        } else {
+            builder.version(HttpClient.Version.HTTP_1_1);
+        }
+        
+        return builder.build();
     }
     
     private Set<Integer> initializeRetryableStatusCodes() {
@@ -262,7 +289,7 @@ public class ApiCrawler {
     }
     
     /**
-     * Single crawl attempt without retry logic
+     * Single crawl attempt with enhanced concurrency and HTTP/2 support
      */
     private CrawlResult attemptCrawl(String url, Map<String, String> customHeaders, int attemptNumber) {
         CrawlResult result = new CrawlResult(url);
@@ -279,62 +306,37 @@ public class ApiCrawler {
             }
             
             if (attemptNumber == 0) {
-                logger.info("🔍 Crawling URL: {}", url);
+                logger.info("🔍 Crawling URL: {} (HTTP/2: {})", url, enableHttp2);
             } else {
                 logger.info("🔁 Retry attempt #{} for URL: {}", attemptNumber + 1, url);
             }
             
-            HttpRequest.Builder requestBuilder = HttpRequest.newBuilder()
-                    .uri(URI.create(url))
-                    .timeout(Duration.ofSeconds(30))
-                    .GET();
-            
-            // Add default headers
-            for (Map.Entry<String, String> header : defaultHeaders.entrySet()) {
-                requestBuilder.header(header.getKey(), header.getValue());
-            }
-            
-            // Add custom headers
-            if (customHeaders != null) {
-                for (Map.Entry<String, String> header : customHeaders.entrySet()) {
-                    requestBuilder.header(header.getKey(), header.getValue());
-                }
-            }
-            
-            HttpRequest request = requestBuilder.build();
-            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
-            
-            result.setStatusCode(response.statusCode());
-            
-            // Extract response headers
-            Map<String, String> responseHeaders = new HashMap<>();
-            response.headers().map().forEach((key, values) -> {
-                responseHeaders.put(key, String.join(", ", values));
-            });
-            result.setHeaders(responseHeaders);
-            
-            String responseBody = response.body();
-            
-            // Parse JSON response
-            if (responseBody != null && !responseBody.trim().isEmpty()) {
-                try {
-                    JsonNode jsonNode = objectMapper.readTree(responseBody);
-                    Map<String, Object> data = objectMapper.convertValue(jsonNode, new TypeReference<Map<String, Object>>() {});
-                    result.setData(data);
-                } catch (Exception e) {
-                    logger.warn("Failed to parse JSON response for URL: {}, treating as plain text", url);
-                    Map<String, Object> data = new HashMap<>();
-                    data.put("raw_response", responseBody);
-                    result.setData(data);
-                }
-            }
-            
-            // Check if status code indicates success
-            if (response.statusCode() >= 200 && response.statusCode() < 300) {
-                logger.debug("✅ Successfully crawled URL: {} with status code: {}", url, result.getStatusCode());
+            // Use advanced crawling with concurrent processing
+            if (enableConcurrentProcessing) {
+                return attemptConcurrentCrawl(url, customHeaders, result, startTime);
             } else {
-                logger.warn("⚠️ Non-success status code {} for URL: {}", response.statusCode(), url);
+                return attemptStandardCrawl(url, customHeaders, result, startTime);
             }
+            
+        } catch (Exception e) {
+            logger.warn("🔧 Error in crawl attempt for URL: {} - {}", url, e.getMessage());
+            result.setErrorMessage(e.getMessage());
+            result.setCrawlDurationMs(System.currentTimeMillis() - startTime);
+            return result;
+        }
+    }
+    
+    /**
+     * Standard sequential crawling approach
+     */
+    private CrawlResult attemptStandardCrawl(String url, Map<String, String> customHeaders, CrawlResult result, long startTime) {
+        try {
+            HttpRequest request = buildHttpRequest(url, customHeaders);
+            HttpClient clientToUse = enableHttp2 ? http2Client : httpClient;
+            
+            HttpResponse<String> response = clientToUse.send(request, HttpResponse.BodyHandlers.ofString());
+            
+            processResponse(response, result);
             
         } catch (IOException | InterruptedException e) {
             logger.warn("🔧 Network error crawling URL: {} - {}", url, e.getMessage());
@@ -350,6 +352,164 @@ public class ApiCrawler {
     }
     
     /**
+     * Enhanced concurrent crawling with parallel processing
+     */
+    private CrawlResult attemptConcurrentCrawl(String url, Map<String, String> customHeaders, CrawlResult result, long startTime) {
+        try {
+            HttpRequest request = buildHttpRequest(url, customHeaders);
+            HttpClient clientToUse = enableHttp2 ? http2Client : httpClient;
+            
+            // Concurrent download and processing
+            CompletableFuture<HttpResponse<String>> downloadFuture = 
+                clientToUse.sendAsync(request, HttpResponse.BodyHandlers.ofString());
+            
+            // Process response when download completes
+            CompletableFuture<Void> processingFuture = downloadFuture.thenAcceptAsync(response -> {
+                try {
+                    processResponse(response, result);
+                    logger.debug("⚡ Concurrent processing completed for URL: {}", url);
+                } catch (Exception e) {
+                    logger.warn("🔧 Error in concurrent processing for URL: {} - {}", url, e.getMessage());
+                    result.setErrorMessage("Processing error: " + e.getMessage());
+                }
+            }, processingPool);
+            
+            // Wait for both download and processing to complete
+            processingFuture.get(45, TimeUnit.SECONDS); // Slightly longer timeout for concurrent operations
+            
+        } catch (Exception e) {
+            logger.warn("🔧 Error in concurrent crawl for URL: {} - {}", url, e.getMessage());
+            result.setErrorMessage(e.getMessage());
+            if (e instanceof InterruptedException) {
+                Thread.currentThread().interrupt();
+            }
+        } finally {
+            result.setCrawlDurationMs(System.currentTimeMillis() - startTime);
+        }
+        
+        return result;
+    }
+    
+    /**
+     * Build HTTP request with optimizations
+     */
+    private HttpRequest buildHttpRequest(String url, Map<String, String> customHeaders) {
+        HttpRequest.Builder requestBuilder = HttpRequest.newBuilder()
+                .uri(URI.create(url))
+                .timeout(Duration.ofSeconds(30))
+                .GET();
+        
+        // Add default headers
+        for (Map.Entry<String, String> header : defaultHeaders.entrySet()) {
+            requestBuilder.header(header.getKey(), header.getValue());
+        }
+        
+        // Add custom headers
+        if (customHeaders != null) {
+            for (Map.Entry<String, String> header : customHeaders.entrySet()) {
+                requestBuilder.header(header.getKey(), header.getValue());
+            }
+        }
+        
+        // Note: HttpClient automatically handles compression (gzip, deflate, br)
+        // No need to explicitly set Accept-Encoding as it can cause decompression issues
+        
+        return requestBuilder.build();
+    }
+    
+    /**
+     * Process HTTP response with optional parallel JSON parsing
+     */
+    private void processResponse(HttpResponse<String> response, CrawlResult result) {
+        result.setStatusCode(response.statusCode());
+        
+        // Extract response headers
+        Map<String, String> responseHeaders = new HashMap<>();
+        response.headers().map().forEach((key, values) -> {
+            responseHeaders.put(key, String.join(", ", values));
+        });
+        result.setHeaders(responseHeaders);
+        
+        String responseBody = response.body();
+        
+        // Enhanced JSON parsing
+        if (responseBody != null && !responseBody.trim().isEmpty()) {
+            if (enableConcurrentProcessing && responseBody.length() > 10000) {
+                // Use parallel processing for large responses
+                processLargeJsonResponse(responseBody, result);
+            } else {
+                // Standard processing for smaller responses
+                processStandardJsonResponse(responseBody, result);
+            }
+        }
+        
+        // Log success/failure
+        if (response.statusCode() >= 200 && response.statusCode() < 300) {
+            logger.debug("✅ Successfully processed response for status: {}", response.statusCode());
+        } else {
+            logger.warn("⚠️ Non-success status code: {}", response.statusCode());
+        }
+    }
+    
+    /**
+     * Standard JSON processing with compression detection
+     */
+    private void processStandardJsonResponse(String responseBody, CrawlResult result) {
+        try {
+            // Check if response appears to be compressed binary data
+            if (responseBody.length() > 0 && (responseBody.charAt(0) == 0x1F || responseBody.contains("\u001F"))) {
+                logger.error("❌ Response appears to be compressed binary data - decompression failed");
+                Map<String, Object> data = new HashMap<>();
+                data.put("parsing_error", "Response appears to be compressed (GZIP/deflate) but was not properly decompressed by HttpClient");
+                data.put("raw_response", responseBody.substring(0, Math.min(200, responseBody.length())) + "...[truncated]");
+                result.setData(data);
+                return;
+            }
+            
+            JsonNode jsonNode = objectMapper.readTree(responseBody);
+            Map<String, Object> data = objectMapper.convertValue(jsonNode, new TypeReference<Map<String, Object>>() {});
+            result.setData(data);
+        } catch (Exception e) {
+            logger.warn("Failed to parse JSON response: {}", e.getMessage());
+            Map<String, Object> data = new HashMap<>();
+            data.put("parsing_error", e.getMessage());
+            data.put("raw_response", responseBody.substring(0, Math.min(500, responseBody.length())) + 
+                                   (responseBody.length() > 500 ? "...[truncated " + (responseBody.length() - 500) + " chars]" : ""));
+            result.setData(data);
+        }
+    }
+    
+    /**
+     * Parallel processing for large JSON responses
+     */
+    private void processLargeJsonResponse(String responseBody, CrawlResult result) {
+        try {
+            // Submit JSON parsing to processing pool
+            CompletableFuture<Map<String, Object>> parsingFuture = CompletableFuture.supplyAsync(() -> {
+                try {
+                    JsonNode jsonNode = objectMapper.readTree(responseBody);
+                    return objectMapper.convertValue(jsonNode, new TypeReference<Map<String, Object>>() {});
+                } catch (Exception e) {
+                    logger.debug("JSON parsing failed in parallel processor, falling back to raw text");
+                    Map<String, Object> fallback = new HashMap<>();
+                    fallback.put("raw_response", responseBody);
+                    fallback.put("parsing_error", e.getMessage());
+                    return fallback;
+                }
+            }, processingPool);
+            
+            // Get result with timeout
+            Map<String, Object> data = parsingFuture.get(10, TimeUnit.SECONDS);
+            result.setData(data);
+            logger.debug("⚡ Large JSON response processed in parallel");
+            
+        } catch (Exception e) {
+            logger.warn("Parallel JSON processing failed, falling back to standard processing");
+            processStandardJsonResponse(responseBody, result);
+        }
+    }
+    
+    /**
      * Crawl multiple URLs asynchronously
      */
     public CompletableFuture<Map<String, CrawlResult>> crawlAsync(java.util.List<String> urls) {
@@ -357,9 +517,27 @@ public class ApiCrawler {
     }
     
     /**
-     * Crawl multiple URLs asynchronously with custom headers
+     * Crawl multiple URLs asynchronously with enhanced batching and load balancing
      */
     public CompletableFuture<Map<String, CrawlResult>> crawlAsync(java.util.List<String> urls, Map<String, String> customHeaders) {
+        if (urls.isEmpty()) {
+            return CompletableFuture.completedFuture(new HashMap<>());
+        }
+        
+        logger.info("🚀 Starting batch crawl of {} URLs with enhanced concurrency", urls.size());
+        
+        // Enhanced batch processing with load balancing
+        if (enableConcurrentProcessing && urls.size() > 1) {
+            return crawlBatchEnhanced(urls, customHeaders);
+        } else {
+            return crawlBatchStandard(urls, customHeaders);
+        }
+    }
+    
+    /**
+     * Standard batch crawling
+     */
+    private CompletableFuture<Map<String, CrawlResult>> crawlBatchStandard(List<String> urls, Map<String, String> customHeaders) {
         Map<String, CompletableFuture<CrawlResult>> futures = new HashMap<>();
         
         for (String url : urls) {
@@ -382,6 +560,106 @@ public class ApiCrawler {
                     });
                     return results;
                 });
+    }
+    
+    /**
+     * Enhanced batch crawling with intelligent load balancing and HTTP/2 connection reuse
+     */
+    private CompletableFuture<Map<String, CrawlResult>> crawlBatchEnhanced(List<String> urls, Map<String, String> customHeaders) {
+        // Group URLs by host for optimal connection reuse
+        Map<String, List<String>> urlsByHost = groupUrlsByHost(urls);
+        Map<String, CompletableFuture<Map<String, CrawlResult>>> hostFutures = new HashMap<>();
+        
+        logger.info("⚡ Enhanced batch crawling: {} hosts, {} total URLs", urlsByHost.size(), urls.size());
+        
+        // Process each host's URLs concurrently but with connection reuse
+        for (Map.Entry<String, List<String>> entry : urlsByHost.entrySet()) {
+            String host = entry.getKey();
+            List<String> hostUrls = entry.getValue();
+            
+            CompletableFuture<Map<String, CrawlResult>> hostFuture = CompletableFuture.supplyAsync(() -> {
+                return crawlHostUrlsConcurrently(host, hostUrls, customHeaders);
+            }, executorService);
+            
+            hostFutures.put(host, hostFuture);
+        }
+        
+        // Combine all host results
+        return CompletableFuture.allOf(hostFutures.values().toArray(new CompletableFuture[0]))
+                .thenApply(v -> {
+                    Map<String, CrawlResult> allResults = new HashMap<>();
+                    hostFutures.forEach((host, future) -> {
+                        try {
+                            Map<String, CrawlResult> hostResults = future.get();
+                            allResults.putAll(hostResults);
+                            logger.debug("✅ Completed crawling {} URLs for host: {}", hostResults.size(), host);
+                        } catch (Exception e) {
+                            logger.error("❌ Error crawling host {}: {}", host, e.getMessage());
+                        }
+                    });
+                    logger.info("🎯 Enhanced batch crawl completed: {}/{} URLs successful", 
+                              allResults.values().stream().mapToInt(r -> r.isSuccessful() ? 1 : 0).sum(),
+                              allResults.size());
+                    return allResults;
+                });
+    }
+    
+    /**
+     * Group URLs by hostname for optimal connection reuse
+     */
+    private Map<String, List<String>> groupUrlsByHost(List<String> urls) {
+        Map<String, List<String>> grouped = new HashMap<>();
+        
+        for (String url : urls) {
+            try {
+                String host = URI.create(url).getHost();
+                grouped.computeIfAbsent(host, k -> new ArrayList<>()).add(url);
+            } catch (Exception e) {
+                logger.warn("⚠️ Invalid URL format, using fallback grouping: {}", url);
+                grouped.computeIfAbsent("unknown", k -> new ArrayList<>()).add(url);
+            }
+        }
+        
+        return grouped;
+    }
+    
+    /**
+     * Crawl multiple URLs from the same host with optimal connection reuse
+     */
+    private Map<String, CrawlResult> crawlHostUrlsConcurrently(String host, List<String> urls, Map<String, String> customHeaders) {
+        Map<String, CrawlResult> results = new HashMap<>();
+        
+        if (enableHttp2 && urls.size() > 1) {
+            // Use HTTP/2 multiplexing for same-host URLs
+            logger.debug("🔄 Using HTTP/2 multiplexing for {} URLs on host: {}", urls.size(), host);
+            
+            List<CompletableFuture<CrawlResult>> urlFutures = urls.stream()
+                .map(url -> CompletableFuture.supplyAsync(() -> crawl(url, customHeaders), processingPool))
+                .toList();
+            
+            // Wait for all to complete
+            CompletableFuture.allOf(urlFutures.toArray(new CompletableFuture[0])).join();
+            
+            // Collect results
+            for (int i = 0; i < urls.size(); i++) {
+                try {
+                    CrawlResult result = urlFutures.get(i).get();
+                    results.put(urls.get(i), result);
+                } catch (Exception e) {
+                    logger.error("Error in multiplexed crawl for URL: {}", urls.get(i), e);
+                    CrawlResult errorResult = new CrawlResult(urls.get(i));
+                    errorResult.setErrorMessage("Multiplexed crawl error: " + e.getMessage());
+                    results.put(urls.get(i), errorResult);
+                }
+            }
+        } else {
+            // Standard sequential processing for HTTP/1.1 or single URL
+            for (String url : urls) {
+                results.put(url, crawl(url, customHeaders));
+            }
+        }
+        
+        return results;
     }
     
         /**
@@ -570,14 +848,23 @@ public class ApiCrawler {
     }
     
     public void shutdown() {
-        logger.info("🔄 Shutting down crawler thread pools...");
+        logger.info("🔄 Shutting down enhanced crawler with all thread pools...");
         
         // Log final thread pool statistics
         Map<String, Object> finalStats = getThreadPoolStats();
         logger.info("📊 Final Thread Pool Stats: {}", finalStats);
+        logger.info("🔄 Processing Pool Active: {}, Parallelism: {}", 
+                   processingPool.getActiveThreadCount(), processingPool.getParallelism());
         
         try {
-            // Shutdown monitoring service first
+            // Shutdown processing pool first (for concurrent response processing)
+            processingPool.shutdown();
+            if (!processingPool.awaitTermination(10, TimeUnit.SECONDS)) {
+                processingPool.shutdownNow();
+                logger.warn("⚠️ Processing pool forced shutdown");
+            }
+            
+            // Shutdown monitoring service
             monitoringService.shutdown();
             if (!monitoringService.awaitTermination(5, TimeUnit.SECONDS)) {
                 monitoringService.shutdownNow();
@@ -596,10 +883,13 @@ public class ApiCrawler {
                 }
             }
             
-            logger.info("✅ All thread pools shut down successfully");
+            logger.info("✅ All enhanced thread pools shut down successfully");
+            logger.info("🚀 Enhanced scalability features: HTTP/2={}, Concurrent Processing={}", 
+                       enableHttp2, enableConcurrentProcessing);
             
         } catch (InterruptedException e) {
             logger.warn("🚨 Shutdown interrupted, forcing immediate termination");
+            processingPool.shutdownNow();
             monitoringService.shutdownNow();
             executorService.shutdownNow();
             Thread.currentThread().interrupt();

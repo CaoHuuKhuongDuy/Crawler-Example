@@ -3,3 +3,50 @@
 2025-06-23 20:48:29.325 [com.webcrawler.SimpleCrawler.main()] INFO  com.webcrawler.core.ApiCrawler - 🔄 Shutting down crawler thread pools...
 2025-06-23 20:48:29.325 [com.webcrawler.SimpleCrawler.main()] INFO  com.webcrawler.core.ApiCrawler - 📊 Final Thread Pool Stats: {activeThreads=0, completedTasks=1, threadsCreated=10, queueSize=0, threadsReplaced=0, poolSize=1, corePoolSize=10, lastHealthCheck=Mon Jun 23 20:48:27 GMT+07:00 2025, isHealthy=false}
 2025-06-23 20:48:29.335 [com.webcrawler.SimpleCrawler.main()] INFO  com.webcrawler.core.ApiCrawler - ✅ All thread pools shut down successfully
+2025-06-23 20:58:18.199 [com.webcrawler.SimpleCrawler.main()] INFO  com.webcrawler.core.ApiCrawler - 🔄 HTTP/2 client created for enhanced multiplexing
+2025-06-23 20:58:18.260 [com.webcrawler.SimpleCrawler.main()] INFO  com.webcrawler.core.ApiCrawler - 🚀 Enhanced ApiCrawler initialized:
+2025-06-23 20:58:18.260 [com.webcrawler.SimpleCrawler.main()] INFO  com.webcrawler.core.ApiCrawler -    Thread Pool Size: 10
+2025-06-23 20:58:18.261 [com.webcrawler.SimpleCrawler.main()] INFO  com.webcrawler.core.ApiCrawler -    HTTP/2 Enabled: true
+2025-06-23 20:58:18.261 [com.webcrawler.SimpleCrawler.main()] INFO  com.webcrawler.core.ApiCrawler -    Concurrent Processing: true
+2025-06-23 20:58:18.261 [com.webcrawler.SimpleCrawler.main()] INFO  com.webcrawler.core.ApiCrawler -    Max Connections per Host: 4
+2025-06-23 20:58:18.261 [com.webcrawler.SimpleCrawler.main()] INFO  com.webcrawler.core.ApiCrawler -    Processing Parallelism: 10
+2025-06-23 20:58:18.279 [com.webcrawler.SimpleCrawler.main()] INFO  com.webcrawler.core.ApiCrawler - 🚀 Starting batch crawl of 1 URLs with enhanced concurrency
+2025-06-23 20:58:18.281 [robust-crawler-thread-1] INFO  com.webcrawler.core.ApiCrawler - 🔍 Crawling URL: https://content.guardianapis.com/search?from-date=2024-12-10&to-date=2024-12-12&show-fields=headline,byline,body,thumbnail&page-size=20&api-key=test&section=sport (HTTP/2: true)
+2025-06-23 20:58:18.282 [robust-crawler-thread-1] WARN  com.webcrawler.core.ApiCrawler - 🔧 Error in concurrent crawl for URL: https://content.guardianapis.com/search?from-date=2024-12-10&to-date=2024-12-12&show-fields=headline,byline,body,thumbnail&page-size=20&api-key=test&section=sport - restricted header name: "Connection"
+2025-06-23 20:58:18.282 [robust-crawler-thread-1] WARN  com.webcrawler.core.ApiCrawler - ❌ Non-retryable error for URL: https://content.guardianapis.com/search?from-date=2024-12-10&to-date=2024-12-12&show-fields=headline,byline,body,thumbnail&page-size=20&api-key=test&section=sport - Status: 0, Error: restricted header name: "Connection"
+2025-06-23 20:58:18.294 [com.webcrawler.SimpleCrawler.main()] INFO  c.webcrawler.storage.JsonFileStorage - Saved 0 clean results to: /Users/cao.huukhuongduy/Documents/Code/shu/crawler/output/guardian_sport_news_2024-12-10_to_2024-12-12.json
+2025-06-23 20:58:18.295 [com.webcrawler.SimpleCrawler.main()] INFO  com.webcrawler.core.ApiCrawler - 🔄 Shutting down enhanced crawler with all thread pools...
+2025-06-23 20:58:18.295 [com.webcrawler.SimpleCrawler.main()] INFO  com.webcrawler.core.ApiCrawler - 📊 Final Thread Pool Stats: {activeThreads=0, completedTasks=1, threadsCreated=10, queueSize=0, threadsReplaced=0, poolSize=1, corePoolSize=10, lastHealthCheck=Mon Jun 23 20:58:18 GMT+07:00 2025, isHealthy=false}
+2025-06-23 20:58:18.303 [com.webcrawler.SimpleCrawler.main()] INFO  com.webcrawler.core.ApiCrawler - 🔄 Processing Pool Active: 0, Parallelism: 10
+2025-06-23 20:58:18.304 [com.webcrawler.SimpleCrawler.main()] INFO  com.webcrawler.core.ApiCrawler - ✅ All enhanced thread pools shut down successfully
+2025-06-23 20:58:18.304 [com.webcrawler.SimpleCrawler.main()] INFO  com.webcrawler.core.ApiCrawler - 🚀 Enhanced scalability features: HTTP/2=true, Concurrent Processing=true
+2025-06-23 21:01:46.001 [com.webcrawler.SimpleCrawler.main()] INFO  com.webcrawler.core.ApiCrawler - 🔄 HTTP/2 client created for enhanced multiplexing
+2025-06-23 21:01:46.069 [com.webcrawler.SimpleCrawler.main()] INFO  com.webcrawler.core.ApiCrawler - 🚀 Enhanced ApiCrawler initialized:
+2025-06-23 21:01:46.069 [com.webcrawler.SimpleCrawler.main()] INFO  com.webcrawler.core.ApiCrawler -    Thread Pool Size: 10
+2025-06-23 21:01:46.070 [com.webcrawler.SimpleCrawler.main()] INFO  com.webcrawler.core.ApiCrawler -    HTTP/2 Enabled: true
+2025-06-23 21:01:46.070 [com.webcrawler.SimpleCrawler.main()] INFO  com.webcrawler.core.ApiCrawler -    Concurrent Processing: true
+2025-06-23 21:01:46.070 [com.webcrawler.SimpleCrawler.main()] INFO  com.webcrawler.core.ApiCrawler -    Max Connections per Host: 4
+2025-06-23 21:01:46.070 [com.webcrawler.SimpleCrawler.main()] INFO  com.webcrawler.core.ApiCrawler -    Processing Parallelism: 10
+2025-06-23 21:01:46.086 [com.webcrawler.SimpleCrawler.main()] INFO  com.webcrawler.core.ApiCrawler - 🚀 Starting batch crawl of 1 URLs with enhanced concurrency
+2025-06-23 21:01:46.089 [robust-crawler-thread-1] INFO  com.webcrawler.core.ApiCrawler - 🔍 Crawling URL: https://content.guardianapis.com/search?from-date=2024-12-10&to-date=2024-12-12&show-fields=headline,byline,body,thumbnail&page-size=15&api-key=test&section=technology (HTTP/2: true)
+2025-06-23 21:01:47.729 [com.webcrawler.SimpleCrawler.main()] INFO  c.webcrawler.storage.JsonFileStorage - Saved 1 clean results to: /Users/cao.huukhuongduy/Documents/Code/shu/crawler/output/guardian_technology_news_2024-12-10_to_2024-12-12.json
+2025-06-23 21:01:47.730 [com.webcrawler.SimpleCrawler.main()] INFO  com.webcrawler.core.ApiCrawler - 🔄 Shutting down enhanced crawler with all thread pools...
+2025-06-23 21:01:47.730 [com.webcrawler.SimpleCrawler.main()] INFO  com.webcrawler.core.ApiCrawler - 📊 Final Thread Pool Stats: {activeThreads=0, completedTasks=1, threadsCreated=10, queueSize=0, threadsReplaced=0, poolSize=1, corePoolSize=10, lastHealthCheck=Mon Jun 23 21:01:46 GMT+07:00 2025, isHealthy=false}
+2025-06-23 21:01:47.738 [com.webcrawler.SimpleCrawler.main()] INFO  com.webcrawler.core.ApiCrawler - 🔄 Processing Pool Active: 0, Parallelism: 10
+2025-06-23 21:01:47.739 [com.webcrawler.SimpleCrawler.main()] INFO  com.webcrawler.core.ApiCrawler - ✅ All enhanced thread pools shut down successfully
+2025-06-23 21:01:47.739 [com.webcrawler.SimpleCrawler.main()] INFO  com.webcrawler.core.ApiCrawler - 🚀 Enhanced scalability features: HTTP/2=true, Concurrent Processing=true
+2025-06-23 21:04:33.241 [com.webcrawler.SimpleCrawler.main()] INFO  com.webcrawler.core.ApiCrawler - 🔄 HTTP/2 client created for enhanced multiplexing
+2025-06-23 21:04:33.306 [com.webcrawler.SimpleCrawler.main()] INFO  com.webcrawler.core.ApiCrawler - 🚀 Enhanced ApiCrawler initialized:
+2025-06-23 21:04:33.306 [com.webcrawler.SimpleCrawler.main()] INFO  com.webcrawler.core.ApiCrawler -    Thread Pool Size: 10
+2025-06-23 21:04:33.307 [com.webcrawler.SimpleCrawler.main()] INFO  com.webcrawler.core.ApiCrawler -    HTTP/2 Enabled: true
+2025-06-23 21:04:33.307 [com.webcrawler.SimpleCrawler.main()] INFO  com.webcrawler.core.ApiCrawler -    Concurrent Processing: true
+2025-06-23 21:04:33.307 [com.webcrawler.SimpleCrawler.main()] INFO  com.webcrawler.core.ApiCrawler -    Max Connections per Host: 4
+2025-06-23 21:04:33.307 [com.webcrawler.SimpleCrawler.main()] INFO  com.webcrawler.core.ApiCrawler -    Processing Parallelism: 10
+2025-06-23 21:04:33.322 [com.webcrawler.SimpleCrawler.main()] INFO  com.webcrawler.core.ApiCrawler - 🚀 Starting batch crawl of 1 URLs with enhanced concurrency
+2025-06-23 21:04:33.323 [robust-crawler-thread-1] INFO  com.webcrawler.core.ApiCrawler - 🔍 Crawling URL: https://content.guardianapis.com/search?from-date=2025-06-01&to-date=2025-06-30&show-fields=headline,byline,body,thumbnail&page-size=200&api-key=test (HTTP/2: true)
+2025-06-23 21:04:38.097 [com.webcrawler.SimpleCrawler.main()] INFO  c.webcrawler.storage.JsonFileStorage - Saved 1 clean results to: /Users/cao.huukhuongduy/Documents/Code/shu/crawler/output/guardian_news_2025-06-01_to_2025-06-30.json
+2025-06-23 21:04:38.097 [com.webcrawler.SimpleCrawler.main()] INFO  com.webcrawler.core.ApiCrawler - 🔄 Shutting down enhanced crawler with all thread pools...
+2025-06-23 21:04:38.098 [com.webcrawler.SimpleCrawler.main()] INFO  com.webcrawler.core.ApiCrawler - 📊 Final Thread Pool Stats: {activeThreads=0, completedTasks=1, threadsCreated=10, queueSize=0, threadsReplaced=0, poolSize=1, corePoolSize=10, lastHealthCheck=Mon Jun 23 21:04:33 GMT+07:00 2025, isHealthy=false}
+2025-06-23 21:04:38.105 [com.webcrawler.SimpleCrawler.main()] INFO  com.webcrawler.core.ApiCrawler - 🔄 Processing Pool Active: 0, Parallelism: 10
+2025-06-23 21:04:38.106 [com.webcrawler.SimpleCrawler.main()] INFO  com.webcrawler.core.ApiCrawler - ✅ All enhanced thread pools shut down successfully
+2025-06-23 21:04:38.106 [com.webcrawler.SimpleCrawler.main()] INFO  com.webcrawler.core.ApiCrawler - 🚀 Enhanced scalability features: HTTP/2=true, Concurrent Processing=true

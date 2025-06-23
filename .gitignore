@@ -2,3 +2,5 @@ logs/
 output/
 .idea/
 target/
+REPORT.md
+.DS_Store
