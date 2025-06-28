@@ -2,11 +2,12 @@ package com.webcrawler;
 
 import com.webcrawler.core.ApiCrawler;
 import com.webcrawler.model.CrawlResult;
-import com.webcrawler.storage.CrawlDataStorage;
+import com.webcrawler.storage.JsonFileStorage;
 import org.apache.commons.cli.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
@@ -39,9 +40,41 @@ public class CrawlerApp {
             long baseRetryDelayMs = Long.parseLong(cmd.getOptionValue("retry-delay", "1000"));
             double backoffMultiplier = Double.parseDouble(cmd.getOptionValue("backoff-multiplier", "2.0"));
             
-            // Initialize crawler and storage
-            ApiCrawler crawler = new ApiCrawler(threadPoolSize, rateLimitMs, maxRetries, baseRetryDelayMs, backoffMultiplier);
+            // HTTP/2 and concurrency configuration
+            boolean enableHttp2 = !cmd.hasOption("disable-http2"); // Default to true unless disabled
+            if (cmd.hasOption("enable-http2")) {
+                enableHttp2 = true; // Explicitly enable
+            }
+            
+            boolean enableConcurrentProcessing = !cmd.hasOption("disable-concurrent-processing"); // Default to true unless disabled
+            if (cmd.hasOption("enable-concurrent-processing")) {
+                enableConcurrentProcessing = true; // Explicitly enable
+            }
+            
+            int maxConnections = Integer.parseInt(cmd.getOptionValue("max-connections", "4"));
+            
+            // Guardian API specific configuration
+            String fromDate = cmd.getOptionValue("from", "2025-06-01");
+            String toDate = cmd.getOptionValue("to", "2025-06-30");
+            String section = cmd.getOptionValue("section", null);
+            int pageSize = Integer.parseInt(cmd.getOptionValue("page-size", "200"));
+            
+            // Initialize crawler and storage with advanced options
+            ApiCrawler crawler = new ApiCrawler(threadPoolSize, rateLimitMs, maxRetries, baseRetryDelayMs, 
+                                               backoffMultiplier, enableHttp2, enableConcurrentProcessing, maxConnections);
             crawler.setUserAgent(userAgent);
+            
+            // Show configuration
+            System.out.println("🔧 Crawler Configuration:");
+            System.out.println("   Thread Pool Size: " + threadPoolSize);
+            System.out.println("   HTTP/2 Enabled: " + enableHttp2);
+            System.out.println("   Concurrent Processing: " + enableConcurrentProcessing);
+            System.out.println("   Max Connections per Host: " + maxConnections);
+            System.out.println("   Rate Limit: " + rateLimitMs + "ms");
+            System.out.println("   Max Retries: " + maxRetries);
+            System.out.println("   Base Retry Delay: " + baseRetryDelayMs + "ms");
+            System.out.println("   Backoff Multiplier: " + backoffMultiplier + "x");
+            System.out.println();
             
             // Show retry configuration
             System.out.println("🔧 Retry Configuration:");
@@ -50,23 +83,46 @@ public class CrawlerApp {
             System.out.println("   Backoff multiplier: " + crawler.getBackoffMultiplier() + "x");
             System.out.println();
             
-            CrawlDataStorage storage = new CrawlDataStorage();
+            JsonFileStorage storage = new JsonFileStorage();
             
             if (cmd.hasOption("url")) {
                 // Crawl single URL
                 String url = cmd.getOptionValue("url");
                 crawlSingleUrl(crawler, storage, url);
             } else if (cmd.hasOption("examples")) {
-                // Run example crawls
-                runExampleCrawls(crawler, storage);
+                // Run Guardian news crawl (like SimpleCrawler but with advanced features)
+                runGuardianNewsCrawl(crawler, storage, fromDate, toDate, section, pageSize);
             } else if (cmd.hasOption("stats")) {
                 // Show statistics
                 showStats(storage);
             } else {
-                // Default: show examples
-                System.out.println("No specific action requested. Here are some example APIs you can crawl:");
-                printExampleApis();
-                System.out.println("\nUse --examples to run example crawls, or --help for more options.");
+                // Default: show Guardian API usage
+                System.out.println("🕷️  Enhanced API Web Crawler for Guardian News");
+                System.out.println("==============================================");
+                System.out.println("Usage:");
+                System.out.println("  --examples                                   # Crawl Guardian news from June 2025 (default)");
+                System.out.println("  --url <URL>                                  # Crawl a single URL");
+                System.out.println("  --stats                                      # Show JSON file statistics");
+                System.out.println();
+                System.out.println("Guardian API Options:");
+                System.out.println("  --from <YYYY-MM-DD>                         # Start date (default: 2025-06-01)");
+                System.out.println("  --to <YYYY-MM-DD>                           # End date (default: 2025-06-30)");
+                System.out.println("  --section <name>                            # Filter by section (sport, business, world, etc.)");
+                System.out.println("  --page-size <N>                             # Articles per request 1-200 (default: 200)");
+                System.out.println();
+                System.out.println("Advanced Features:");
+                System.out.println("  --threads <N>                                # Number of threads (default: 10)");
+                System.out.println("  --enable-http2 / --disable-http2            # HTTP/2 multiplexing control");
+                System.out.println("  --enable-concurrent-processing              # Concurrent response processing");
+                System.out.println("  --max-connections <N>                       # Max connections per host (default: 4)");
+                System.out.println("  --max-retries <N>                           # Retry attempts (default: 3)");
+                System.out.println();
+                System.out.println("Examples:");
+                System.out.println("  mvn exec:java -Dexec.args=\"--examples --threads 20 --enable-http2\"");
+                System.out.println("  mvn exec:java -Dexec.args=\"--examples --from 2024-01-01 --to 2024-12-31\"");
+                System.out.println("  mvn exec:java -Dexec.args=\"--examples --section sport --page-size 50\"");
+                System.out.println("  mvn exec:java -Dexec.args=\"--examples --disable-http2\"  # HTTP/1.1 only");
+                System.out.println("  mvn exec:java -Dexec.args=\"--url https://content.guardianapis.com/search?api-key=test\"");
             }
             
             crawler.shutdown();
@@ -140,6 +196,58 @@ public class CrawlerApp {
                 .desc("Exponential backoff multiplier (default: 2.0)")
                 .build());
                 
+        // HTTP/2 and concurrency options
+        options.addOption(Option.builder()
+                .longOpt("enable-http2")
+                .desc("Enable HTTP/2 multiplexing (default: true)")
+                .build());
+                
+        options.addOption(Option.builder()
+                .longOpt("disable-http2")
+                .desc("Disable HTTP/2, use HTTP/1.1 only")
+                .build());
+                
+        options.addOption(Option.builder()
+                .longOpt("enable-concurrent-processing")
+                .desc("Enable concurrent response processing (default: true)")
+                .build());
+                
+        options.addOption(Option.builder()
+                .longOpt("disable-concurrent-processing")
+                .desc("Disable concurrent response processing")
+                .build());
+                
+        options.addOption(Option.builder()
+                .longOpt("max-connections")
+                .hasArg()
+                .desc("Maximum connections per host (default: 4)")
+                .build());
+                
+        // Guardian API specific options
+        options.addOption(Option.builder()
+                .longOpt("from")
+                .hasArg()
+                .desc("Start date for Guardian news (YYYY-MM-DD, default: 2025-06-01)")
+                .build());
+                
+        options.addOption(Option.builder()
+                .longOpt("to")
+                .hasArg()
+                .desc("End date for Guardian news (YYYY-MM-DD, default: 2025-06-30)")
+                .build());
+                
+        options.addOption(Option.builder()
+                .longOpt("section")
+                .hasArg()
+                .desc("Guardian section filter (sport, business, world, politics, etc.)")
+                .build());
+                
+        options.addOption(Option.builder()
+                .longOpt("page-size")
+                .hasArg()
+                .desc("Number of articles per request (1-200, default: 200)")
+                .build());
+                
         return options;
     }
     
@@ -150,11 +258,16 @@ public class CrawlerApp {
                 options, 
                 "\nExamples:\n" +
                 "  java -jar api-web-crawler.jar --examples\n" +
+                "  java -jar api-web-crawler.jar --examples --from 2024-01-01 --to 2024-12-31\n" +
+                "  java -jar api-web-crawler.jar --examples --section sport --page-size 50\n" +
                 "  java -jar api-web-crawler.jar --url https://api.github.com/repos/octocat/Hello-World\n" +
+                "  java -jar api-web-crawler.jar --examples --threads 20 --enable-http2\n" +
+                "  java -jar api-web-crawler.jar --examples --enable-http2 --enable-concurrent-processing --max-connections 8\n" +
+                "  java -jar api-web-crawler.jar --examples --disable-http2  # Use HTTP/1.1 only\n" +
                 "  java -jar api-web-crawler.jar --stats\n");
     }
     
-    private static void crawlSingleUrl(ApiCrawler crawler, CrawlDataStorage storage, String url) {
+    private static void crawlSingleUrl(ApiCrawler crawler, JsonFileStorage storage, String url) {
         System.out.println("Crawling URL: " + url);
         
         CrawlResult result = crawler.crawl(url);
@@ -167,168 +280,136 @@ public class CrawlerApp {
         }
     }
     
-    private static void runExampleCrawls(ApiCrawler crawler, CrawlDataStorage storage) {
-        System.out.println("Running example API crawls...\n");
+    private static void runGuardianNewsCrawl(ApiCrawler crawler, JsonFileStorage storage, String fromDate, String toDate, String section, int pageSize) {
+        if (section != null) {
+            System.out.println("📰 Crawling Guardian " + section + " news from " + fromDate + " to " + toDate + " with enhanced features...\n");
+        } else {
+            System.out.println("📰 Crawling Guardian news from " + fromDate + " to " + toDate + " with enhanced features...\n");
+        }
         
-        List<String> exampleUrls = getExampleUrls();
+        List<String> newsUrls = getGuardianUrls(fromDate, toDate, section, pageSize);
         
-        // Crawl asynchronously
-        CompletableFuture<Map<String, CrawlResult>> future = crawler.crawlAsync(exampleUrls);
+        // Crawl asynchronously with enhanced features
+        CompletableFuture<Map<String, CrawlResult>> future = crawler.crawlAsync(newsUrls);
         
         try {
             Map<String, CrawlResult> results = future.get();
-            
-            System.out.println("Crawl Results:");
-            System.out.println("==============");
+            List<CrawlResult> allResults = new ArrayList<>();
             
             for (Map.Entry<String, CrawlResult> entry : results.entrySet()) {
                 CrawlResult result = entry.getValue();
-                System.out.printf("URL: %s%n", result.getUrl());
-                System.out.printf("Status: %d%n", result.getStatusCode());
-                System.out.printf("Duration: %dms%n", result.getCrawlDurationMs());
-                System.out.printf("Success: %s%n", result.isSuccessful());
                 
-                if (result.getData() != null) {
-                    System.out.printf("Data keys: %s%n", result.getData().keySet());
+                System.out.println("🔍 " + result.getUrl());
+                
+                if (result.isSuccessful()) {
+                    System.out.println("✅ Success - Status: " + result.getStatusCode() + 
+                                     " - Duration: " + result.getCrawlDurationMs() + "ms");
                     
-                    // Show some interesting data
-                    showInterestingData(result);
+                    // Show Guardian-specific data
+                    showGuardianNewsData(result);
+                } else {
+                    System.out.println("❌ Failed - Status: " + result.getStatusCode() + 
+                                     " - Error: " + result.getErrorMessage());
                 }
                 
-                if (result.getErrorMessage() != null) {
-                    System.out.printf("Error: %s%n", result.getErrorMessage());
-                }
+                // Add to results list
+                allResults.add(result);
                 
                 System.out.println("---");
-                
-                // Save to storage
-                storage.save(result);
             }
             
-            System.out.println("\nCrawl completed. Results saved to database.");
-            showStats(storage);
+            // Save results to Guardian-specific file
+            String filename;
+            if (section != null && !section.trim().isEmpty()) {
+                filename = "guardian_" + section.trim().toLowerCase() + "_news_" + fromDate + "_to_" + toDate + ".json";
+            } else {
+                filename = "guardian_news_" + fromDate + "_to_" + toDate + ".json";
+            }
+            storage.saveAllToSingleFile(allResults, filename);
+            
+            System.out.println("\n📊 Crawl Summary:");
+            System.out.println("================");
+            System.out.println("Total URLs: " + allResults.size());
+            System.out.println("✅ Successful: " + allResults.stream().mapToInt(r -> r.isSuccessful() ? 1 : 0).sum());
+            System.out.println("❌ Failed: " + allResults.stream().mapToInt(r -> r.isSuccessful() ? 0 : 1).sum());
+            System.out.println("⏱️  Total Duration: " + allResults.stream().mapToLong(CrawlResult::getCrawlDurationMs).sum() + "ms");
+            System.out.println("⚡ Average Duration: " + allResults.stream().mapToLong(CrawlResult::getCrawlDurationMs).average().orElse(0) + "ms");
+            System.out.println("🎯 Success Rate: " + String.format("%.1f%%", 
+                allResults.stream().mapToDouble(r -> r.isSuccessful() ? 100.0 : 0.0).average().orElse(0)));
+            
+            System.out.println("\n✅ Guardian news crawling completed! Check the 'output' directory for JSON files.");
             
         } catch (Exception e) {
-            logger.error("Error running example crawls", e);
-            System.err.println("Error running crawls: " + e.getMessage());
+            logger.error("Error running Guardian news crawls", e);
+            System.err.println("Error running Guardian news crawls: " + e.getMessage());
         }
     }
     
-    private static List<String> getExampleUrls() {
-        return Arrays.asList(
-            // GitHub API - Repository info
-            "https://api.github.com/repos/octocat/Hello-World",
-            
-            // JSONPlaceholder - Test API
-            "https://jsonplaceholder.typicode.com/posts/1",
-            "https://jsonplaceholder.typicode.com/users/1",
-            
-            // CoinGecko API - Cryptocurrency data
-            "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd",
-            
-            // REST Countries API
-            "https://restcountries.com/v3.1/name/japan",
-            
-            // Cat Facts API
-            "https://catfact.ninja/fact",
-            
-            // News API (may require API key for full access)
-            "https://newsapi.org/v2/top-headlines?country=us&apiKey=demo",
-            
-            // Random User API
-            "https://randomuser.me/api/",
-            
-            // Open Weather API (demo data)
-            "https://samples.openweathermap.org/data/2.5/weather?q=London&appid=demo"
-        );
+    private static List<String> getGuardianUrls(String fromDate, String toDate, String section, int pageSize) {
+        StringBuilder urlBuilder = new StringBuilder();
+        urlBuilder.append("https://content.guardianapis.com/search?from-date=")
+                  .append(fromDate)
+                  .append("&to-date=")
+                  .append(toDate)
+                  .append("&show-fields=headline,byline,body,thumbnail")
+                  .append("&page-size=")
+                  .append(pageSize)
+                  .append("&api-key=test");
+        
+        // Add section filter if specified
+        if (section != null && !section.trim().isEmpty()) {
+            urlBuilder.append("&section=").append(section.trim().toLowerCase());
+        }
+        
+        return Arrays.asList(urlBuilder.toString());
     }
     
-    private static void showInterestingData(CrawlResult result) {
+    private static void showGuardianNewsData(CrawlResult result) {
         Map<String, Object> data = result.getData();
         String url = result.getUrl();
         
         try {
-            if (url.contains("github.com")) {
-                System.out.printf("  GitHub Repo: %s (Stars: %s, Language: %s)%n", 
-                    data.get("name"), data.get("stargazers_count"), data.get("language"));
-            } else if (url.contains("jsonplaceholder")) {
-                if (data.containsKey("title")) {
-                    System.out.printf("  Post: %s%n", data.get("title"));
-                } else if (data.containsKey("name")) {
-                    System.out.printf("  User: %s (%s)%n", data.get("name"), data.get("email"));
+            if (url.contains("guardian")) {
+                Map<String, Object> response = (Map<String, Object>) data.get("response");
+                List<?> results = (List<?>) response.get("results");
+                Integer total = (Integer) response.get("total");
+                
+                System.out.println("📰 Guardian News (" + url + "): Found " + results.size() + " articles out of " + total + " total");
+                
+                // Show first few article headlines
+                for (int i = 0; i < Math.min(3, results.size()); i++) {
+                    Map<String, Object> article = (Map<String, Object>) results.get(i);
+                    String headline = (String) article.get("webTitle");
+                    String section = (String) article.get("sectionName");
+                    System.out.println("   📝 [" + section + "] " + headline);
                 }
-            } else if (url.contains("coingecko")) {
-                System.out.printf("  Bitcoin Price: $%s%n", 
-                    ((Map<String, Object>) data.get("bitcoin")).get("usd"));
-            } else if (url.contains("restcountries")) {
-                List<?> countries = (List<?>) data;
-                if (!countries.isEmpty()) {
-                    Map<String, Object> country = (Map<String, Object>) countries.get(0);
-                    System.out.printf("  Country: %s (Capital: %s)%n", 
-                        ((Map<String, Object>) country.get("name")).get("common"),
-                        ((List<?>) country.get("capital")).get(0));
-                }
-            } else if (url.contains("catfact")) {
-                System.out.printf("  Cat Fact: %s%n", data.get("fact"));
-            } else if (url.contains("randomuser")) {
-                List<?> results = (List<?>) data.get("results");
-                if (!results.isEmpty()) {
-                    Map<String, Object> user = (Map<String, Object>) results.get(0);
-                    Map<String, Object> name = (Map<String, Object>) user.get("name");
-                    System.out.printf("  Random User: %s %s%n", name.get("first"), name.get("last"));
+                
+                if (results.size() > 3) {
+                    System.out.println("   ... and " + (results.size() - 3) + " more articles");
                 }
             }
+            
         } catch (Exception e) {
-            // Ignore data parsing errors for display
-            logger.debug("Error displaying data for {}: {}", url, e.getMessage());
+            logger.debug("Error displaying Guardian news data for {}: {}", url, e.getMessage());
+            System.out.println("📰 Guardian data available (parsing error)");
         }
     }
     
-    private static void showStats(CrawlDataStorage storage) {
-        CrawlDataStorage.CrawlStats stats = storage.getStats();
-        System.out.println("\nCrawling Statistics:");
-        System.out.println("===================");
-        System.out.println(stats);
+    private static void showStats(JsonFileStorage storage) {
+        System.out.println("\nJSON File Storage Statistics:");
+        System.out.println("============================");
         
-        if (stats.getTotalRequests() > 0) {
-            System.out.println("\nRecent successful results:");
-            List<CrawlResult> recent = storage.getSuccessful(5);
-            for (CrawlResult result : recent) {
-                System.out.printf("  %s - %d (%dms)%n", 
-                    result.getUrl(), result.getStatusCode(), result.getCrawlDurationMs());
+        List<String> jsonFiles = storage.listJsonFiles();
+        System.out.println("Output Directory: " + storage.getOutputDirectory());
+        System.out.println("Total JSON Files: " + jsonFiles.size());
+        
+        if (!jsonFiles.isEmpty()) {
+            System.out.println("\nAvailable JSON Files:");
+            for (String filename : jsonFiles) {
+                System.out.println("  📄 " + filename);
             }
+        } else {
+            System.out.println("\nNo JSON files found. Run some crawls first!");
         }
-    }
-    
-    private static void printExampleApis() {
-        System.out.println("\nExample APIs you can crawl:");
-        System.out.println("===========================");
-        
-        System.out.println("1. GitHub API:");
-        System.out.println("   https://api.github.com/repos/octocat/Hello-World");
-        System.out.println("   https://api.github.com/users/octocat");
-        
-        System.out.println("\n2. JSONPlaceholder (Testing API):");
-        System.out.println("   https://jsonplaceholder.typicode.com/posts");
-        System.out.println("   https://jsonplaceholder.typicode.com/users");
-        
-        System.out.println("\n3. CoinGecko (Cryptocurrency):");
-        System.out.println("   https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd");
-        
-        System.out.println("\n4. REST Countries:");
-        System.out.println("   https://restcountries.com/v3.1/all");
-        System.out.println("   https://restcountries.com/v3.1/name/japan");
-        
-        System.out.println("\n5. Cat Facts API:");
-        System.out.println("   https://catfact.ninja/fact");
-        
-        System.out.println("\n6. Random User API:");
-        System.out.println("   https://randomuser.me/api/");
-        
-        System.out.println("\n7. News API (requires API key):");
-        System.out.println("   https://newsapi.org/v2/top-headlines?country=us&apiKey=YOUR_KEY");
-        
-        System.out.println("\n8. OpenWeather API (requires API key):");
-        System.out.println("   https://api.openweathermap.org/data/2.5/weather?q=London&appid=YOUR_KEY");
     }
 } 

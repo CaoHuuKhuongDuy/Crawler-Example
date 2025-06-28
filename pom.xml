@@ -115,7 +115,7 @@
                 <artifactId>exec-maven-plugin</artifactId>
                 <version>3.1.0</version>
                 <configuration>
-                    <mainClass>com.webcrawler.SimpleCrawler</mainClass>
+                    <mainClass>com.webcrawler.CrawlerApp</mainClass>
                 </configuration>
             </plugin>
         </plugins>

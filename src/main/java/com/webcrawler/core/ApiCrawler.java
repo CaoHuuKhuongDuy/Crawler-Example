@@ -302,7 +302,7 @@ public class ApiCrawler {
             }
             
             if (attemptNumber == 0) {
-                requestCount.incrementAndGet();
+            requestCount.incrementAndGet();
             }
             
             if (attemptNumber == 0) {
@@ -394,23 +394,23 @@ public class ApiCrawler {
      * Build HTTP request with optimizations
      */
     private HttpRequest buildHttpRequest(String url, Map<String, String> customHeaders) {
-        HttpRequest.Builder requestBuilder = HttpRequest.newBuilder()
-                .uri(URI.create(url))
-                .timeout(Duration.ofSeconds(30))
-                .GET();
-        
-        // Add default headers
-        for (Map.Entry<String, String> header : defaultHeaders.entrySet()) {
-            requestBuilder.header(header.getKey(), header.getValue());
-        }
-        
-        // Add custom headers
-        if (customHeaders != null) {
-            for (Map.Entry<String, String> header : customHeaders.entrySet()) {
+            HttpRequest.Builder requestBuilder = HttpRequest.newBuilder()
+                    .uri(URI.create(url))
+                    .timeout(Duration.ofSeconds(30))
+                    .GET();
+            
+            // Add default headers
+            for (Map.Entry<String, String> header : defaultHeaders.entrySet()) {
                 requestBuilder.header(header.getKey(), header.getValue());
             }
-        }
-        
+            
+            // Add custom headers
+            if (customHeaders != null) {
+                for (Map.Entry<String, String> header : customHeaders.entrySet()) {
+                    requestBuilder.header(header.getKey(), header.getValue());
+                }
+            }
+            
         // Note: HttpClient automatically handles compression (gzip, deflate, br)
         // No need to explicitly set Accept-Encoding as it can cause decompression issues
         
@@ -421,19 +421,19 @@ public class ApiCrawler {
      * Process HTTP response with optional parallel JSON parsing
      */
     private void processResponse(HttpResponse<String> response, CrawlResult result) {
-        result.setStatusCode(response.statusCode());
-        
-        // Extract response headers
-        Map<String, String> responseHeaders = new HashMap<>();
-        response.headers().map().forEach((key, values) -> {
-            responseHeaders.put(key, String.join(", ", values));
-        });
-        result.setHeaders(responseHeaders);
-        
-        String responseBody = response.body();
-        
+            result.setStatusCode(response.statusCode());
+            
+            // Extract response headers
+            Map<String, String> responseHeaders = new HashMap<>();
+            response.headers().map().forEach((key, values) -> {
+                responseHeaders.put(key, String.join(", ", values));
+            });
+            result.setHeaders(responseHeaders);
+            
+            String responseBody = response.body();
+            
         // Enhanced JSON parsing
-        if (responseBody != null && !responseBody.trim().isEmpty()) {
+            if (responseBody != null && !responseBody.trim().isEmpty()) {
             if (enableConcurrentProcessing && responseBody.length() > 10000) {
                 // Use parallel processing for large responses
                 processLargeJsonResponse(responseBody, result);
@@ -662,13 +662,13 @@ public class ApiCrawler {
         return results;
     }
     
-        /**
+    /**
      * Make a POST request to an API
      */
     public CrawlResult postData(String url, String jsonBody) {
         return postData(url, jsonBody, null);
     }
-
+    
     /**
      * Make a POST request to an API with custom headers
      */
@@ -735,7 +735,7 @@ public class ApiCrawler {
     private CrawlResult attemptPost(String url, String jsonBody, Map<String, String> customHeaders, int attemptNumber) {
         CrawlResult result = new CrawlResult(url);
         long startTime = System.currentTimeMillis();
-
+        
         try {
             // Simple rate limiting (only on first attempt to avoid double delay)
             if (attemptNumber == 0 && requestCount.get() > 0) {
@@ -743,7 +743,7 @@ public class ApiCrawler {
             }
             
             if (attemptNumber == 0) {
-                requestCount.incrementAndGet();
+            requestCount.incrementAndGet();
             }
 
             if (attemptNumber == 0) {
@@ -751,39 +751,39 @@ public class ApiCrawler {
             } else {
                 logger.info("🔁 POST retry attempt #{} for URL: {}", attemptNumber + 1, url);
             }
-
+            
             HttpRequest.Builder requestBuilder = HttpRequest.newBuilder()
                     .uri(URI.create(url))
                     .timeout(Duration.ofSeconds(30))
                     .header("Content-Type", "application/json")
                     .POST(HttpRequest.BodyPublishers.ofString(jsonBody));
-
+            
             // Add default headers
             for (Map.Entry<String, String> header : defaultHeaders.entrySet()) {
                 requestBuilder.header(header.getKey(), header.getValue());
             }
-
+            
             // Add custom headers
             if (customHeaders != null) {
                 for (Map.Entry<String, String> header : customHeaders.entrySet()) {
                     requestBuilder.header(header.getKey(), header.getValue());
                 }
             }
-
+            
             HttpRequest request = requestBuilder.build();
             HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
-
+            
             result.setStatusCode(response.statusCode());
-
+            
             // Extract response headers
             Map<String, String> responseHeaders = new HashMap<>();
             response.headers().map().forEach((key, values) -> {
                 responseHeaders.put(key, String.join(", ", values));
             });
             result.setHeaders(responseHeaders);
-
+            
             String responseBody = response.body();
-
+            
             // Parse JSON response
             if (responseBody != null && !responseBody.trim().isEmpty()) {
                 try {
@@ -797,14 +797,14 @@ public class ApiCrawler {
                     result.setData(data);
                 }
             }
-
+            
             // Check if status code indicates success
             if (response.statusCode() >= 200 && response.statusCode() < 300) {
                 logger.debug("✅ Successfully posted to URL: {} with status code: {}", url, result.getStatusCode());
             } else {
                 logger.warn("⚠️ Non-success status code {} for POST to URL: {}", response.statusCode(), url);
             }
-
+            
         } catch (IOException | InterruptedException e) {
             logger.warn("🔧 Network error posting to URL: {} - {}", url, e.getMessage());
             result.setErrorMessage(e.getMessage());
@@ -814,19 +814,19 @@ public class ApiCrawler {
         } finally {
             result.setCrawlDurationMs(System.currentTimeMillis() - startTime);
         }
-
+        
         return result;
     }
     
-        public void setUserAgent(String userAgent) {
+    public void setUserAgent(String userAgent) {
         this.userAgent = userAgent;
         this.defaultHeaders.put("User-Agent", userAgent);
     }
-
+    
     public void addDefaultHeader(String name, String value) {
         this.defaultHeaders.put(name, value);
     }
-
+    
     public long getRequestCount() {
         return requestCount.get();
     }
