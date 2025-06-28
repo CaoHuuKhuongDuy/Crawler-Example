@@ -37,11 +37,26 @@ A high-performance web crawler specifically designed for The Guardian API with a
 git clone <repository-url>
 cd crawler
 
-# Build the project
+# Clean and build the project
 mvn clean compile
 
 # Test with default Guardian crawl (June 2025)
 mvn exec:java -Dexec.mainClass="com.webcrawler.CrawlerApp" -Dexec.args="--examples"
+```
+
+### Build Commands
+```bash
+# Clean and compile the project
+mvn clean compile
+
+# Clean, compile, and run tests
+mvn clean test
+
+# Create executable JAR with dependencies
+mvn clean package
+
+# Run with JAR file (after mvn package)
+java -jar target/crawler-1.0-SNAPSHOT-jar-with-dependencies.jar --examples
 ```
 
 ## 🎯 Usage Examples
