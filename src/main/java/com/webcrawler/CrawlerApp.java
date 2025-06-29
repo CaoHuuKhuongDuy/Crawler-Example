@@ -9,6 +9,7 @@ import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
@@ -108,7 +109,7 @@ public class CrawlerApp {
                 System.out.println("  --from <YYYY-MM-DD>                         # Start date (default: 2025-06-01)");
                 System.out.println("  --to <YYYY-MM-DD>                           # End date (default: 2025-06-30)");
                 System.out.println("  --section <name>                            # Filter by section (sport, business, world, etc.)");
-                System.out.println("  --page-size <N>                             # Articles per request 1-200 (default: 200)");
+                System.out.println("  --page-size <N>                             # Articles per request (default: 200, >200 uses pagination)");
                 System.out.println();
                 System.out.println("Advanced Features:");
                 System.out.println("  --threads <N>                                # Number of threads (default: 10)");
@@ -245,7 +246,7 @@ public class CrawlerApp {
         options.addOption(Option.builder()
                 .longOpt("page-size")
                 .hasArg()
-                .desc("Number of articles per request (1-200, default: 200)")
+                .desc("Number of articles per request (default: 200, >200 uses pagination)")
                 .build());
                 
         return options;
@@ -296,27 +297,43 @@ public class CrawlerApp {
             Map<String, CrawlResult> results = future.get();
             List<CrawlResult> allResults = new ArrayList<>();
             
-            for (Map.Entry<String, CrawlResult> entry : results.entrySet()) {
-                CrawlResult result = entry.getValue();
+            // Check if we have multiple paginated results to combine
+            if (newsUrls.size() > 1) {
+                // Multiple paginated requests - combine results
+                CrawlResult combinedResult = combinePaginatedResults(results, newsUrls, fromDate, toDate, section, pageSize);
+                allResults.add(combinedResult);
                 
-                System.out.println("🔍 " + result.getUrl());
-                
-                if (result.isSuccessful()) {
-                    System.out.println("✅ Success - Status: " + result.getStatusCode() + 
-                                     " - Duration: " + result.getCrawlDurationMs() + "ms");
-                    
-                    // Show Guardian-specific data
-                    showGuardianNewsData(result);
+                System.out.println("🔍 Combined paginated results from " + newsUrls.size() + " requests");
+                if (combinedResult.isSuccessful()) {
+                    System.out.println("✅ Success - Combined " + newsUrls.size() + " pages - Duration: " + combinedResult.getCrawlDurationMs() + "ms");
+                    showGuardianNewsData(combinedResult);
                 } else {
-                    System.out.println("❌ Failed - Status: " + result.getStatusCode() + 
-                                     " - Error: " + result.getErrorMessage());
+                    System.out.println("❌ Failed to combine paginated results");
                 }
-                
-                // Add to results list
-                allResults.add(result);
-                
-                System.out.println("---");
+            } else {
+                // Single request - process normally
+                for (Map.Entry<String, CrawlResult> entry : results.entrySet()) {
+                    CrawlResult result = entry.getValue();
+                    
+                    System.out.println("🔍 " + result.getUrl());
+                    
+                    if (result.isSuccessful()) {
+                        System.out.println("✅ Success - Status: " + result.getStatusCode() + 
+                                         " - Duration: " + result.getCrawlDurationMs() + "ms");
+                        
+                        // Show Guardian-specific data
+                        showGuardianNewsData(result);
+                    } else {
+                        System.out.println("❌ Failed - Status: " + result.getStatusCode() + 
+                                         " - Error: " + result.getErrorMessage());
+                    }
+                    
+                    // Add to results list
+                    allResults.add(result);
+                }
             }
+            
+            System.out.println("---");
             
             // Save results to Guardian-specific file
             String filename;
@@ -329,7 +346,7 @@ public class CrawlerApp {
             
             System.out.println("\n📊 Crawl Summary:");
             System.out.println("================");
-            System.out.println("Total URLs: " + allResults.size());
+            System.out.println("Total URLs: " + newsUrls.size());
             System.out.println("✅ Successful: " + allResults.stream().mapToInt(r -> r.isSuccessful() ? 1 : 0).sum());
             System.out.println("❌ Failed: " + allResults.stream().mapToInt(r -> r.isSuccessful() ? 0 : 1).sum());
             System.out.println("⏱️  Total Duration: " + allResults.stream().mapToLong(CrawlResult::getCrawlDurationMs).sum() + "ms");
@@ -346,22 +363,174 @@ public class CrawlerApp {
     }
     
     private static List<String> getGuardianUrls(String fromDate, String toDate, String section, int pageSize) {
-        StringBuilder urlBuilder = new StringBuilder();
-        urlBuilder.append("https://content.guardianapis.com/search?from-date=")
-                  .append(fromDate)
-                  .append("&to-date=")
-                  .append(toDate)
-                  .append("&show-fields=headline,byline,body,thumbnail")
-                  .append("&page-size=")
-                  .append(pageSize)
-                  .append("&api-key=test");
+        List<String> urls = new ArrayList<>();
         
-        // Add section filter if specified
-        if (section != null && !section.trim().isEmpty()) {
-            urlBuilder.append("&section=").append(section.trim().toLowerCase());
+        // Guardian API has a maximum page-size of 200
+        int maxPageSize = 200;
+        
+        if (pageSize <= maxPageSize) {
+            // Single request - within API limits
+            StringBuilder urlBuilder = new StringBuilder();
+            urlBuilder.append("https://content.guardianapis.com/search?from-date=")
+                      .append(fromDate)
+                      .append("&to-date=")
+                      .append(toDate)
+                      .append("&show-fields=headline,byline,body,thumbnail")
+                      .append("&page-size=")
+                      .append(pageSize)
+                      .append("&api-key=test");
+            
+            // Add section filter if specified
+            if (section != null && !section.trim().isEmpty()) {
+                urlBuilder.append("&section=").append(section.trim().toLowerCase());
+            }
+            
+            urls.add(urlBuilder.toString());
+        } else {
+            // Multiple requests - pagination needed
+            int totalRequests = (int) Math.ceil((double) pageSize / maxPageSize);
+            
+            System.out.println("📄 Page size (" + pageSize + ") exceeds Guardian API limit (200).");
+            System.out.println("📄 Will make " + totalRequests + " paginated requests to fetch " + pageSize + " articles...\n");
+            
+            for (int page = 1; page <= totalRequests; page++) {
+                int currentPageSize = Math.min(maxPageSize, pageSize - (page - 1) * maxPageSize);
+                
+                StringBuilder urlBuilder = new StringBuilder();
+                urlBuilder.append("https://content.guardianapis.com/search?from-date=")
+                          .append(fromDate)
+                          .append("&to-date=")
+                          .append(toDate)
+                          .append("&show-fields=headline,byline,body,thumbnail")
+                          .append("&page-size=")
+                          .append(currentPageSize)
+                          .append("&page=")
+                          .append(page)
+                          .append("&api-key=test");
+                
+                // Add section filter if specified
+                if (section != null && !section.trim().isEmpty()) {
+                    urlBuilder.append("&section=").append(section.trim().toLowerCase());
+                }
+                
+                urls.add(urlBuilder.toString());
+            }
         }
         
-        return Arrays.asList(urlBuilder.toString());
+        return urls;
+    }
+    
+    /**
+     * Combine multiple paginated Guardian API results into a single result
+     */
+    private static CrawlResult combinePaginatedResults(Map<String, CrawlResult> results, List<String> urls, 
+                                                      String fromDate, String toDate, String section, int requestedPageSize) {
+        // Create a combined URL for the result
+        String combinedUrl = "https://content.guardianapis.com/search?from-date=" + fromDate + "&to-date=" + toDate;
+        if (section != null && !section.trim().isEmpty()) {
+            combinedUrl += "&section=" + section.trim().toLowerCase();
+        }
+        combinedUrl += "&page-size=" + requestedPageSize + "&api-key=test";
+        
+        CrawlResult combinedResult = new CrawlResult(combinedUrl);
+        
+        List<Map<String, Object>> allArticles = new ArrayList<>();
+        long totalDuration = 0;
+        int successfulRequests = 0;
+        int totalArticles = 0;
+        String lastError = null;
+        
+        // Process each paginated result
+        for (String url : urls) {
+            CrawlResult pageResult = results.get(url);
+            if (pageResult != null) {
+                totalDuration += pageResult.getCrawlDurationMs();
+                
+                if (pageResult.isSuccessful() && pageResult.getData() != null) {
+                    successfulRequests++;
+                    
+                    try {
+                        // Extract articles from this page
+                        Map<String, Object> data = pageResult.getData();
+                        
+                        // The data structure is: data -> response -> results (direct, not nested under URL)
+                        if (data.containsKey("response")) {
+                            Map<String, Object> apiResponse = (Map<String, Object>) data.get("response");
+                            
+                            if (apiResponse.containsKey("results")) {
+                                List<Map<String, Object>> pageArticles = (List<Map<String, Object>>) apiResponse.get("results");
+                                allArticles.addAll(pageArticles);
+                                
+                                // Get total count from first successful response
+                                if (totalArticles == 0 && apiResponse.containsKey("total")) {
+                                    totalArticles = (Integer) apiResponse.get("total");
+                                }
+                            }
+                        } else {
+                            // Alternative: try the nested structure (data -> {url} -> response -> results)
+                            for (Map.Entry<String, Object> entry : data.entrySet()) {
+                                Object responseObj = entry.getValue();
+                                if (responseObj instanceof Map) {
+                                    Map<String, Object> responseMap = (Map<String, Object>) responseObj;
+                                    if (responseMap.containsKey("response")) {
+                                        Map<String, Object> apiResponse = (Map<String, Object>) responseMap.get("response");
+                                        
+                                        if (apiResponse.containsKey("results")) {
+                                            List<Map<String, Object>> pageArticles = (List<Map<String, Object>>) apiResponse.get("results");
+                                            allArticles.addAll(pageArticles);
+                                            
+                                            // Get total count from first successful response
+                                            if (totalArticles == 0 && apiResponse.containsKey("total")) {
+                                                totalArticles = (Integer) apiResponse.get("total");
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    } catch (Exception e) {
+                        logger.warn("Error processing paginated result from {}: {}", url, e.getMessage());
+                        lastError = "Error processing page: " + e.getMessage();
+                    }
+                } else {
+                    lastError = pageResult.getErrorMessage();
+                }
+            } else {
+                logger.warn("No result found for URL: {}", url);
+            }
+        }
+        
+        // Set combined result properties
+        combinedResult.setCrawlDurationMs(totalDuration);
+        
+        if (successfulRequests > 0) {
+            // Create combined response structure
+            Map<String, Object> combinedData = new HashMap<>();
+            Map<String, Object> combinedResponse = new HashMap<>();
+            Map<String, Object> apiResponse = new HashMap<>();
+            
+            apiResponse.put("status", "ok");
+            apiResponse.put("total", totalArticles);
+            apiResponse.put("results", allArticles);
+            apiResponse.put("pages", urls.size());
+            apiResponse.put("pagesCombined", successfulRequests);
+            apiResponse.put("articlesRetrieved", allArticles.size());
+            
+            combinedResponse.put("response", apiResponse);
+            combinedData.put(combinedUrl, combinedResponse);
+            
+            combinedResult.setData(combinedData);
+            combinedResult.setStatusCode(200);
+            
+            System.out.println("📄 Successfully combined " + successfulRequests + "/" + urls.size() + " pages");
+            System.out.println("📄 Retrieved " + allArticles.size() + " articles out of " + totalArticles + " total available");
+        } else {
+            // All requests failed
+            combinedResult.setStatusCode(400);
+            combinedResult.setErrorMessage("All paginated requests failed. Last error: " + lastError);
+        }
+        
+        return combinedResult;
     }
     
     private static void showGuardianNewsData(CrawlResult result) {
