@@ -66,6 +66,12 @@ public class ApiCrawler {
     private final double backoffMultiplier;
     private final Set<Integer> retryableStatusCodes;
     
+    // Failure simulation configuration
+    private boolean failureSimulationEnabled = false;
+    private int failureIntervalSeconds = 10;
+    private int failureThreadCount = 2;
+    private final AtomicLong lastFailureTime = new AtomicLong(0);
+    
     // Configuration
     private String userAgent = "ApiWebCrawler/1.0";
     
@@ -207,17 +213,37 @@ public class ApiCrawler {
      * Determine if an exception should trigger a retry
      */
     private boolean shouldRetryException(Exception e) {
-        if (e instanceof IOException) {
-            String message = e.getMessage().toLowerCase();
-            // Network-related errors that might be temporary
-            return message.contains("timeout") ||
-                   message.contains("connection reset") ||
-                   message.contains("connection refused") ||
-                   message.contains("no route to host") ||
-                   message.contains("host unreachable") ||
-                   message.contains("network unreachable") ||
-                   message.contains("connection timed out");
+        // Thread interruption or cancellation due to thread failures - these should be retried
+        if (e instanceof InterruptedException ||
+            e instanceof java.util.concurrent.CancellationException ||
+            e instanceof java.util.concurrent.TimeoutException) {
+            logger.info("🔄 Retryable thread interruption: {}", e.getClass().getSimpleName());
+            return true;
         }
+        
+        if (e instanceof IOException) {
+            String message = e.getMessage();
+            
+            // Handle null or empty messages (often from thread interruption)
+            if (message == null || message.trim().isEmpty() || message.equals("null")) {
+                logger.info("🔄 Retrying null/empty IOException (likely thread interruption)");
+                return true;
+            }
+            
+            String lowerMessage = message.toLowerCase();
+            // Network-related errors that might be temporary
+            return lowerMessage.contains("timeout") ||
+                   lowerMessage.contains("connection reset") ||
+                   lowerMessage.contains("connection refused") ||
+                   lowerMessage.contains("no route to host") ||
+                   lowerMessage.contains("host unreachable") ||
+                   lowerMessage.contains("network unreachable") ||
+                   lowerMessage.contains("connection timed out") ||
+                   lowerMessage.contains("interrupt") ||
+                   lowerMessage.contains("cancelled") ||
+                   lowerMessage.contains("thread");
+        }
+        
         return false;
     }
     
@@ -242,6 +268,9 @@ public class ApiCrawler {
         CrawlResult lastResult = null;
         
         for (int attempt = 0; attempt <= maxRetries; attempt++) {
+            // Check for failure simulation during crawling
+            checkAndSimulateFailures();
+            
             lastResult = attemptCrawl(url, customHeaders, attempt);
             
             // If successful, return immediately
@@ -268,11 +297,18 @@ public class ApiCrawler {
                 logger.warn("⚠️ Retryable HTTP status {} for URL: {} (attempt {}/{})", 
                           lastResult.getStatusCode(), url, attempt + 1, maxRetries + 1);
             }
-            // Retry on network exceptions
+            // Retry on network exceptions or thread-related errors
             else if (lastResult.getErrorMessage() != null && shouldRetryException(new IOException(lastResult.getErrorMessage()))) {
                 shouldRetryThis = true;
                 logger.warn("⚠️ Retryable network error for URL: {} - {} (attempt {}/{})", 
                           url, lastResult.getErrorMessage(), attempt + 1, maxRetries + 1);
+            }
+            // Retry on null errors or status code 0 (often from thread interruption)
+            else if ((lastResult.getErrorMessage() == null || lastResult.getErrorMessage().equals("null")) 
+                     && lastResult.getStatusCode() == 0) {
+                shouldRetryThis = true;
+                logger.warn("⚠️ Retryable null error for URL: {} (likely thread interruption) (attempt {}/{})", 
+                          url, attempt + 1, maxRetries + 1);
             }
             
             if (!shouldRetryThis) {
@@ -541,7 +577,11 @@ public class ApiCrawler {
         Map<String, CompletableFuture<CrawlResult>> futures = new HashMap<>();
         
         for (String url : urls) {
-            CompletableFuture<CrawlResult> future = CompletableFuture.supplyAsync(() -> crawl(url, customHeaders), executorService);
+            CompletableFuture<CrawlResult> future = CompletableFuture.supplyAsync(() -> {
+                // Check for failure simulation before each crawl
+                checkAndSimulateFailures();
+                return crawl(url, customHeaders);
+            }, executorService);
             futures.put(url, future);
         }
         
@@ -564,6 +604,7 @@ public class ApiCrawler {
     
     /**
      * Enhanced batch crawling with intelligent load balancing and HTTP/2 connection reuse
+     * Now with thread failure resilience
      */
     private CompletableFuture<Map<String, CrawlResult>> crawlBatchEnhanced(List<String> urls, Map<String, String> customHeaders) {
         // Group URLs by host for optimal connection reuse
@@ -577,17 +618,18 @@ public class ApiCrawler {
             String host = entry.getKey();
             List<String> hostUrls = entry.getValue();
             
-            CompletableFuture<Map<String, CrawlResult>> hostFuture = CompletableFuture.supplyAsync(() -> {
-                return crawlHostUrlsConcurrently(host, hostUrls, customHeaders);
-            }, executorService);
+            CompletableFuture<Map<String, CrawlResult>> hostFuture = CompletableFuture.supplyAsync(() -> 
+                crawlHostUrlsConcurrently(host, hostUrls, customHeaders), executorService);
             
             hostFutures.put(host, hostFuture);
         }
         
-        // Combine all host results
+        // Combine all host results with better error handling
         return CompletableFuture.allOf(hostFutures.values().toArray(new CompletableFuture[0]))
                 .thenApply(v -> {
                     Map<String, CrawlResult> allResults = new HashMap<>();
+                    List<String> failedUrls = new ArrayList<>();
+                    
                     hostFutures.forEach((host, future) -> {
                         try {
                             Map<String, CrawlResult> hostResults = future.get();
@@ -595,8 +637,26 @@ public class ApiCrawler {
                             logger.debug("✅ Completed crawling {} URLs for host: {}", hostResults.size(), host);
                         } catch (Exception e) {
                             logger.error("❌ Error crawling host {}: {}", host, e.getMessage());
+                            // Collect failed URLs for retry
+                            List<String> hostUrls = urlsByHost.get(host);
+                            if (hostUrls != null) {
+                                failedUrls.addAll(hostUrls);
+                            }
                         }
                     });
+                    
+                    // Retry failed URLs sequentially (more stable than async for recovery)
+                    if (!failedUrls.isEmpty()) {
+                        logger.warn("🔄 Retrying {} URLs that failed due to thread issues", failedUrls.size());
+                        for (String url : failedUrls) {
+                            if (!allResults.containsKey(url)) {
+                                CrawlResult retryResult = crawl(url, customHeaders);
+                                allResults.put(url, retryResult);
+                                logger.info("🔄 Retry result for {}: {}", url, retryResult.isSuccessful() ? "SUCCESS" : "FAILED");
+                            }
+                        }
+                    }
+                    
                     logger.info("🎯 Enhanced batch crawl completed: {}/{} URLs successful", 
                               allResults.values().stream().mapToInt(r -> r.isSuccessful() ? 1 : 0).sum(),
                               allResults.size());
@@ -847,6 +907,102 @@ public class ApiCrawler {
         return new HashSet<>(retryableStatusCodes);
     }
     
+    /**
+     * Enable thread failure simulation for testing fault tolerance
+     */
+    public void enableFailureSimulation(int intervalSeconds, int threadsToKill) {
+        this.failureSimulationEnabled = true;
+        this.failureIntervalSeconds = intervalSeconds;
+        this.failureThreadCount = threadsToKill;
+        // Set to 0 so the first failure check will trigger immediately after the interval
+        this.lastFailureTime.set(0);
+        logger.info("🔥 Thread failure simulation enabled: {} second intervals, {} threads per failure", 
+                   intervalSeconds, threadsToKill);
+    }
+    
+    /**
+     * Check if it's time to simulate thread failures and execute if needed
+     */
+    private void checkAndSimulateFailures() {
+        if (!failureSimulationEnabled) {
+            return;
+        }
+        
+        long currentTime = System.currentTimeMillis();
+        long timeSinceLastFailure = currentTime - lastFailureTime.get();
+        
+        if (timeSinceLastFailure >= (failureIntervalSeconds * 1000)) {
+            logger.warn("🔥 SIMULATION: Time for thread failure simulation!");
+            System.out.println("🔥 SIMULATION: Triggering thread failures...");
+            System.out.flush();
+            
+            // Simulate failures regardless of active work - we want to test recovery
+            simulateRuntimeExceptionFailures(failureThreadCount);
+            lastFailureTime.set(currentTime);
+            
+            logger.warn("🔥 SIMULATION: Thread failure command issued after {} seconds", 
+                       timeSinceLastFailure / 1000);
+        }
+    }
+    
+    /**
+     * Simulate runtime exception failures - targets both coordination and processing pools
+     */
+    private void simulateRuntimeExceptionFailures(int numberOfThreads) {
+        logger.warn("🔥 SIMULATION: Starting RuntimeException failures in {} threads", numberOfThreads);
+        System.out.println("💀 THREAD FAILURE SIMULATION: Killing " + numberOfThreads + " threads...");
+        System.out.flush(); // Force immediate output
+        
+        // Split failures between both thread pools
+        int coordinationFailures = Math.max(1, numberOfThreads / 2);
+        int processingFailures = numberOfThreads - coordinationFailures;
+        
+        logger.warn("🔥 SIMULATION: Will kill {} coordination threads and {} processing threads", 
+                   coordinationFailures, processingFailures);
+        System.out.println("🔥 SIMULATION TARGET: " + coordinationFailures + " coordination + " + processingFailures + " processing threads");
+        System.out.flush();
+        
+        // Target coordination pool (executorService) - more immediate
+        for (int i = 0; i < coordinationFailures; i++) {
+            final int threadId = i;
+            try {
+                executorService.submit(() -> {
+                    String threadName = Thread.currentThread().getName();
+                    logger.error("💀 COORDINATION THREAD DEATH: {} (ID: {}) is being killed NOW!", threadName, threadId);
+                    System.out.println("💀 KILLING COORDINATION THREAD: " + threadName);
+                    System.out.flush();
+                    
+                    throw new RuntimeException("SIMULATION: Intentional coordination thread failure #" + threadId + " in " + threadName);
+                });
+                System.out.println("✅ SUBMITTED: Coordination thread kill task #" + threadId);
+            } catch (Exception e) {
+                System.out.println("❌ FAILED to submit coordination thread kill task #" + threadId + ": " + e.getMessage());
+            }
+        }
+        
+        // Target processing pool - also immediate
+        for (int i = 0; i < processingFailures; i++) {
+            final int threadId = coordinationFailures + i;
+            try {
+                processingPool.submit(() -> {
+                    String threadName = Thread.currentThread().getName();
+                    logger.error("💀 PROCESSING THREAD DEATH: {} (ID: {}) is being killed NOW!", threadName, threadId);
+                    System.out.println("💀 KILLING PROCESSING THREAD: " + threadName);
+                    System.out.flush();
+                    
+                    throw new RuntimeException("SIMULATION: Intentional processing thread failure #" + threadId + " in " + threadName);
+                });
+                System.out.println("✅ SUBMITTED: Processing thread kill task #" + threadId);
+            } catch (Exception e) {
+                System.out.println("❌ FAILED to submit processing thread kill task #" + threadId + ": " + e.getMessage());
+            }
+        }
+        
+        logger.warn("🔥 SIMULATION: {} thread kill commands submitted. Recovery monitoring active...", numberOfThreads);
+        System.out.println("🔥 SIMULATION: " + numberOfThreads + " thread kill commands submitted. Watch for recovery messages...");
+        System.out.flush();
+    }
+    
     public void shutdown() {
         logger.info("🔄 Shutting down enhanced crawler with all thread pools...");
         
@@ -935,29 +1091,45 @@ public class ApiCrawler {
         @Override
         public Thread newThread(Runnable runnable) {
             Thread thread = new Thread(() -> {
+                String threadName = Thread.currentThread().getName();
+                logger.info("🚀 Thread starting: {}", threadName);
+                
                 try {
                     runnable.run();
+                    logger.info("✅ Thread completed normally: {}", threadName);
+                } catch (RuntimeException e) {
+                    if (e.getMessage() != null && e.getMessage().contains("SIMULATION: Intentional")) {
+                        logger.error("💀 SIMULATED THREAD DEATH: {} - {}", threadName, e.getMessage());
+                        System.out.println("💀 THREAD DIED: " + threadName + " - " + e.getMessage());
+                        System.out.flush();
+                    } else {
+                        logger.error("🚨 Thread died with RuntimeException: {} - {}", threadName, e.getMessage());
+                    }
+                    threadsReplaced.incrementAndGet();
+                    throw e;
                 } catch (OutOfMemoryError e) {
-                    logger.error("🚨 CRITICAL: Thread died due to OutOfMemoryError! Thread: {}", Thread.currentThread().getName());
+                    logger.error("🚨 CRITICAL: Thread died due to OutOfMemoryError! Thread: {}", threadName);
                     threadsReplaced.incrementAndGet();
                     throw e;
                 } catch (Error e) {
-                    logger.error("🚨 CRITICAL: Thread died due to JVM Error: {} - Thread: {}", e.getMessage(), Thread.currentThread().getName());
+                    logger.error("🚨 CRITICAL: Thread died due to JVM Error: {} - Thread: {}", e.getMessage(), threadName);
                     threadsReplaced.incrementAndGet();
                     throw e;
                 } catch (Exception e) {
-                    logger.warn("⚠️ Thread completed with exception: {} - Thread: {}", e.getMessage(), Thread.currentThread().getName());
+                    logger.warn("⚠️ Thread completed with exception: {} - Thread: {}", e.getMessage(), threadName);
                     // Exception in task - thread will be replaced automatically by ThreadPoolExecutor
                 }
             }, "robust-crawler-thread-" + threadNumber.getAndIncrement());
             
             thread.setDaemon(false); // Ensure main threads are not daemon
             thread.setUncaughtExceptionHandler((t, e) -> {
-                logger.error("🚨 Uncaught exception in thread {}: {}", t.getName(), e.getMessage(), e);
+                logger.error("🚨 UNCAUGHT EXCEPTION in thread {}: {}", t.getName(), e.getMessage());
+                System.out.println("🚨 UNCAUGHT EXCEPTION: " + t.getName() + " - " + e.getMessage());
+                System.out.flush();
                 threadsReplaced.incrementAndGet();
             });
             
-            logger.debug("✨ Created new thread: {}", thread.getName());
+            logger.info("✨ Created new thread: {}", thread.getName());
             return thread;
         }
     }
@@ -984,7 +1156,7 @@ public class ApiCrawler {
             } catch (Exception e) {
                 logger.error("Error in thread pool monitoring: {}", e.getMessage());
             }
-        }, 30, 30, TimeUnit.SECONDS); // Check every 30 seconds
+        }, 5, 10, TimeUnit.SECONDS); // Check every 10 seconds, start after 5 seconds
     }
     
     /**
@@ -999,22 +1171,27 @@ public class ApiCrawler {
         long completedTasks = executorService.getCompletedTaskCount();
         int queueSize = executorService.getQueue().size();
         
-        logger.debug("🔍 Thread Pool Health Check:");
-        logger.debug("   Active threads: {}/{}", activeThreads, poolSize);
-        logger.debug("   Core pool size: {}", corePoolSize);
-        logger.debug("   Completed tasks: {}", completedTasks);
-        logger.debug("   Queue size: {}", queueSize);
-        logger.debug("   Threads created: {}", threadsCreated.get());
-        logger.debug("   Threads replaced: {}", threadsReplaced.get());
+        // Always log current status for visibility during failures
+        logger.info("🔍 Health Check: Pool({}/{} active/total), Core: {}, Queue: {}, Replaced: {}", 
+                   activeThreads, poolSize, corePoolSize, queueSize, threadsReplaced.get());
         
         // Check if thread pool is unhealthy
         if (poolSize < corePoolSize) {
-            logger.warn("⚠️ Thread pool size ({}) is below core size ({}). Some threads may have died.", 
+            logger.error("🚨 THREAD POOL DEGRADED: Pool size ({}) below core ({}). RECOVERY STARTING!", 
                        poolSize, corePoolSize);
+            System.out.println("🚨 THREAD POOL RECOVERY: Pool size (" + poolSize + ") below core (" + corePoolSize + ")");
+            System.out.flush();
             
             // Force thread pool to restore to core size
-            executorService.prestartAllCoreThreads();
-            logger.info("🔄 Attempted to restart core threads");
+            int newThreads = executorService.prestartAllCoreThreads();
+            threadsReplaced.addAndGet(newThreads);
+            
+            logger.warn("🔄 RECOVERY COMPLETED: Restarted {} threads. Pool now: {}/{}", 
+                       newThreads, executorService.getPoolSize(), corePoolSize);
+            System.out.println("✅ RECOVERY: Created " + newThreads + " replacement threads");
+            System.out.flush();
+        } else {
+            logger.debug("✅ Thread Pool Healthy: {}/{} threads", poolSize, corePoolSize);
         }
         
         // Alert if queue is growing too large
