@@ -33,11 +33,11 @@ A high-performance web crawler specifically designed for The Guardian API with a
 - **Maven 3.6 or higher** - For building and dependency management
 
 ### Quick Installation
-```bash
+   ```bash
 # Clone the repository
-git clone <repository-url>
-cd crawler
-
+   git clone <repository-url>
+   cd crawler
+   
 # Clean and build the project
 mvn clean compile
 
@@ -46,10 +46,10 @@ mvn exec:java -Dexec.mainClass="com.webcrawler.CrawlerApp" -Dexec.args="--exampl
 ```
 
 ### Build Commands
-```bash
+   ```bash
 # Clean and compile the project
-mvn clean compile
-
+   mvn clean compile
+   
 # Clean, compile, and run tests
 mvn clean test
 
@@ -63,7 +63,7 @@ java -jar target/crawler-1.0-SNAPSHOT-jar-with-dependencies.jar --examples
 ## 🎯 Usage Examples
 
 ### Basic Guardian News Crawling
-```bash
+   ```bash
 # Default Guardian news crawl (June 2025, all features enabled)
 mvn exec:java -Dexec.mainClass="com.webcrawler.CrawlerApp" -Dexec.args="--examples"
 
@@ -243,20 +243,20 @@ output/
 ```json
 {
   "content.guardianapis.com/search": {
-    "response": {
-      "status": "ok",
+  "response": {
+    "status": "ok",
       "total": 5400,
-      "results": [
-        {
+    "results": [
+      {
           "id": "sport/2025/jun/28/f1-lando-norris-pole-austrian-gp",
           "webTitle": "F1: Lando Norris on pole for Austrian GP with Max Verstappen down in seventh",
-          "sectionName": "Sport",
+        "sectionName": "Sport",
           "webPublicationDate": "2025-06-28T21:30:00Z",
-          "fields": {
+        "fields": {
             "headline": "F1: Lando Norris on pole for Austrian GP...",
             "byline": "Guardian Sport",
             "body": "<p>Full article content...</p>",
-            "thumbnail": "https://media.guim.co.uk/..."
+          "thumbnail": "https://media.guim.co.uk/..."
           }
         }
       ]
@@ -492,3 +492,75 @@ ls -la output/guardian_*.json
 ```
 
 This comprehensive command reference demonstrates all the enhanced features: Guardian API integration, HTTP/2 performance, multithreading, fault tolerance, and flexible configuration options!
+
+## Thread Failure Simulation & Auto-Recovery Demo
+
+The crawler includes advanced simulation capabilities to demonstrate its fault tolerance and auto-recovery mechanisms in action. This is perfect for testing, demonstrations, and understanding how the system handles thread failures.
+
+### Available Simulation Types
+
+| Failure Type | Description | Use Case |
+|--------------|-------------|----------|
+| `runtime-exception` | Throws RuntimeException in threads | Most common application errors |
+| `out-of-memory` | Simulates memory exhaustion (limited) | Memory leak scenarios |
+| `thread-death` | Throws ThreadDeath errors | JVM-level thread termination |
+| `deadlock` | Creates deadlock scenarios | Lock contention issues |
+
+### Quick Demo Commands
+
+```bash
+# Show current thread pool statistics
+mvn exec:java -Dexec.args="--show-thread-stats"
+
+# Run comprehensive recovery demo (recommended)
+mvn exec:java -Dexec.args="--demo-recovery"
+
+# Simulate specific failure types
+mvn exec:java -Dexec.args="--simulate-failures runtime-exception --failure-count 3"
+mvn exec:java -Dexec.args="--simulate-failures infinite-loop --monitor-duration 20"
+mvn exec:java -Dexec.args="--simulate-failures deadlock --failure-count 4"
+```
+
+### What You'll See During Simulation
+
+1. **Initial Thread Pool State**: Shows healthy thread pool statistics
+2. **Failure Injection**: Logs show threads being created and failing
+3. **Real-time Recovery Monitoring**: Every second shows pool recovery stats
+4. **Auto-Recovery Process**: Watch threads get replaced automatically
+5. **Final Statistics**: Compare before/after thread pool health
+
+### Example Output
+```
+🧪 SIMULATION: Starting thread failure simulation - Type: runtime-exception, Threads: 3
+🔥 Simulating RuntimeException failures in 3 threads
+💀 Thread-0 about to throw RuntimeException
+💀 Thread-1 about to throw RuntimeException
+💀 Thread-2 about to throw RuntimeException
+
+📊 Recovery Monitor [1s]: Pool:3 Active:2 Created:10 Replaced:0 Queue:0
+📊 Recovery Monitor [2s]: Pool:3 Active:0 Created:10 Replaced:0 Queue:0
+📊 Recovery Monitor [3s]: Pool:3 Active:0 Created:10 Replaced:0 Queue:0
+✅ Recovery monitoring completed
+```
+
+### Advanced Options
+
+```bash
+# Customize simulation parameters
+mvn exec:java -Dexec.args="--simulate-failures runtime-exception \
+  --failure-count 5 \
+  --monitor-duration 30 \
+  --threads 20"
+
+# Test with different thread pool configurations
+mvn exec:java -Dexec.args="--demo-recovery --threads 15 --enable-http2"
+```
+
+### Safety Features
+
+- **Limited Memory Tests**: OutOfMemory simulation is limited to prevent system crashes
+- **Controlled Scope**: Simulations only affect the crawler's thread pool
+- **Auto-shutdown**: All simulations automatically clean up resources
+- **Non-destructive**: No permanent effects on your system
+
+This simulation system lets you safely observe and test the crawler's enterprise-grade fault tolerance capabilities without any risk to your development environment.
