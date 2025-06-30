@@ -13,7 +13,6 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
-import java.io.File;
 
 /**
  * Main application class for the API Web Crawler
@@ -23,12 +22,6 @@ public class CrawlerApp {
     private static final Logger logger = LoggerFactory.getLogger(CrawlerApp.class);
     
     public static void main(String[] args) {
-        // Ensure logs directory exists and logging works
-        ensureLogsDirectoryExists();
-        testBasicLogging();
-        
-        logger.info("🚀 Starting Web Crawler Application");
-        
         Options options = createOptions();
         CommandLineParser parser = new DefaultParser();
         
@@ -103,64 +96,6 @@ public class CrawlerApp {
             } else if (cmd.hasOption("stats")) {
                 // Show statistics
                 showStats(storage);
-            } else if (cmd.hasOption("show-thread-stats")) {
-                // Show thread pool statistics
-                System.out.println("📊 Current Thread Pool Statistics:");
-                crawler.printThreadPoolStats();
-            } else if (cmd.hasOption("simulate-failures")) {
-                // Simulate thread failures
-                String failureType = cmd.getOptionValue("simulate-failures");
-                int failureCount = Integer.parseInt(cmd.getOptionValue("failure-count", "3"));
-                int monitorDuration = Integer.parseInt(cmd.getOptionValue("monitor-duration", "15"));
-                
-                System.out.println("🧪 Running Thread Failure Simulation:");
-                System.out.println("   Failure Type: " + failureType);
-                System.out.println("   Number of Threads: " + failureCount);
-                System.out.println("   Monitor Duration: " + monitorDuration + " seconds");
-                System.out.println();
-                
-                // Show initial stats
-                System.out.println("📋 Initial thread pool state:");
-                crawler.printThreadPoolStats();
-                System.out.println();
-                
-                // Run simulation
-                crawler.simulateThreadFailures(failureType, failureCount);
-                crawler.monitorRecoveryProcess(monitorDuration);
-                
-                // Wait for monitoring to complete
-                try {
-                    Thread.sleep((monitorDuration + 2) * 1000);
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                }
-                
-                // Show final stats
-                System.out.println("\n📋 Final thread pool state:");
-                crawler.printThreadPoolStats();
-                
-            } else if (cmd.hasOption("demo-recovery")) {
-                // Run comprehensive thread recovery demo
-                System.out.println("🎭 Starting Comprehensive Thread Recovery Demo");
-                System.out.println("==============================================");
-                System.out.println("This demo will simulate various thread failures and show auto-recovery.");
-                System.out.println("The process will take approximately 1-2 minutes to complete.\n");
-                
-                crawler.runThreadFailureDemo();
-            } else if (cmd.hasOption("demo-crawl-with-failures")) {
-                // Run real Guardian API crawling with thread failures
-                int failureInterval = Integer.parseInt(cmd.getOptionValue("failure-interval", "10"));
-                
-                System.out.println("🎭 Guardian API Crawling with Thread Failures Demo");
-                System.out.println("==================================================");
-                System.out.println("This demo will crawl real Guardian API data while simulating thread failures.");
-                System.out.println("You'll see threads die and recover while maintaining data integrity.");
-                System.out.println("Failure interval: " + failureInterval + " seconds\n");
-                
-                runGuardianCrawlWithFailures(crawler, storage, fromDate, toDate, section, pageSize, failureInterval);
-            } else if (cmd.hasOption("test-logging")) {
-                // Test logging differences between devices
-                testLoggingDifferences();
             } else {
                 // Default: show Guardian API usage
                 System.out.println("🕷️  Enhanced API Web Crawler for Guardian News");
@@ -169,7 +104,6 @@ public class CrawlerApp {
                 System.out.println("  --examples                                   # Crawl Guardian news from June 2025 (default)");
                 System.out.println("  --url <URL>                                  # Crawl a single URL");
                 System.out.println("  --stats                                      # Show JSON file statistics");
-                System.out.println("  --show-thread-stats                         # Show current thread pool statistics");
                 System.out.println();
                 System.out.println("Guardian API Options:");
                 System.out.println("  --from <YYYY-MM-DD>                         # Start date (default: 2025-06-01)");
@@ -184,31 +118,12 @@ public class CrawlerApp {
                 System.out.println("  --max-connections <N>                       # Max connections per host (default: 4)");
                 System.out.println("  --max-retries <N>                           # Retry attempts (default: 3)");
                 System.out.println();
-                System.out.println("Thread Failure Simulation (Demo Auto-Recovery):");
-                System.out.println("  --demo-recovery                             # Run comprehensive recovery demo");
-                System.out.println("  --simulate-failures <type>                 # Simulate specific failure type:");
-                System.out.println("    runtime-exception                         #   RuntimeException in threads");
-                System.out.println("    out-of-memory                             #   OutOfMemoryError (limited)");
-                System.out.println("    infinite-loop                             #   CPU-consuming infinite loops");
-                System.out.println("    thread-death                              #   ThreadDeath errors");
-                System.out.println("    deadlock                                  #   Deadlock scenarios");
-                System.out.println("  --failure-count <N>                        # Number of threads to kill (default: 3)");
-                System.out.println("  --monitor-duration <N>                     # Monitor recovery for N seconds (default: 15)");
-                System.out.println();
                 System.out.println("Examples:");
                 System.out.println("  mvn exec:java -Dexec.args=\"--examples --threads 20 --enable-http2\"");
                 System.out.println("  mvn exec:java -Dexec.args=\"--examples --from 2024-01-01 --to 2024-12-31\"");
                 System.out.println("  mvn exec:java -Dexec.args=\"--examples --section sport --page-size 50\"");
                 System.out.println("  mvn exec:java -Dexec.args=\"--examples --disable-http2\"  # HTTP/1.1 only");
                 System.out.println("  mvn exec:java -Dexec.args=\"--url https://content.guardianapis.com/search?api-key=test\"");
-                System.out.println();
-                System.out.println("Thread Recovery Demo Examples:");
-                System.out.println("  mvn exec:java -Dexec.args=\"--demo-recovery\"  # Full recovery demo");
-                System.out.println("  mvn exec:java -Dexec.args=\"--demo-crawl-with-failures\"  # Real crawling with failures");
-                System.out.println("  mvn exec:java -Dexec.args=\"--simulate-failures runtime-exception --failure-count 5\"");
-                System.out.println("  mvn exec:java -Dexec.args=\"--simulate-failures thread-death --monitor-duration 20\"");
-                System.out.println("  mvn exec:java -Dexec.args=\"--show-thread-stats\"  # Current thread pool status");
-                System.out.println("  mvn exec:java -Dexec.args=\"--test-logging\"  # Diagnose logging differences between devices");
             }
             
             crawler.shutdown();
@@ -334,51 +249,6 @@ public class CrawlerApp {
                 .desc("Number of articles per request (default: 200, >200 uses pagination)")
                 .build());
                 
-        // Thread simulation options for demo purposes
-        options.addOption(Option.builder()
-                .longOpt("simulate-failures")
-                .hasArg()
-                .desc("Simulate thread failures: runtime-exception, out-of-memory, thread-death, deadlock")
-                .build());
-                
-        options.addOption(Option.builder()
-                .longOpt("failure-count")
-                .hasArg()
-                .desc("Number of threads to kill in simulation (default: 3)")
-                .build());
-                
-        options.addOption(Option.builder()
-                .longOpt("monitor-duration")
-                .hasArg()
-                .desc("Duration in seconds to monitor recovery process (default: 15)")
-                .build());
-                
-        options.addOption(Option.builder()
-                .longOpt("demo-recovery")
-                .desc("Run comprehensive thread failure and recovery demo")
-                .build());
-                
-        options.addOption(Option.builder()
-                .longOpt("show-thread-stats")
-                .desc("Show current thread pool statistics")
-                .build());
-                
-        options.addOption(Option.builder()
-                .longOpt("demo-crawl-with-failures")
-                .desc("Demo real Guardian API crawling with thread failures during process")
-                .build());
-                
-        options.addOption(Option.builder()
-                .longOpt("failure-interval")
-                .hasArg()
-                .desc("Interval in seconds between thread failures during crawling (default: 10)")
-                .build());
-                
-        options.addOption(Option.builder()
-                .longOpt("test-logging")
-                .desc("Test logging system and diagnose differences between devices")
-                .build());
-                
         return options;
     }
     
@@ -442,8 +312,8 @@ public class CrawlerApp {
                 }
             } else {
                 // Single request - process normally
-            for (Map.Entry<String, CrawlResult> entry : results.entrySet()) {
-                CrawlResult result = entry.getValue();
+                for (Map.Entry<String, CrawlResult> entry : results.entrySet()) {
+                    CrawlResult result = entry.getValue();
                     
                     System.out.println("🔍 " + result.getUrl());
                     
@@ -461,10 +331,10 @@ public class CrawlerApp {
                     // Add to results list
                     allResults.add(result);
                 }
-                }
-                
-                System.out.println("---");
-                
+            }
+            
+            System.out.println("---");
+            
             // Save results to Guardian-specific file
             String filename;
             if (section != null && !section.trim().isEmpty()) {
@@ -710,386 +580,5 @@ public class CrawlerApp {
         } else {
             System.out.println("\nNo JSON files found. Run some crawls first!");
         }
-    }
-    
-    /**
-     * Run Guardian API crawling with simulated thread failures during the process
-     * This demonstrates real-world fault tolerance with actual data crawling
-     */
-    private static void runGuardianCrawlWithFailures(ApiCrawler crawler, JsonFileStorage storage, 
-                                                    String fromDate, String toDate, String section, 
-                                                    int pageSize, int failureInterval) {
-        
-        System.out.println("🚀 Starting Guardian API crawling with thread failure simulation");
-        System.out.println("================================================================");
-        
-        // Show initial thread pool state
-        System.out.println("\n📋 Initial thread pool state:");
-        crawler.printThreadPoolStats();
-        
-        // Create a larger date range to get more articles (~5000+)
-        List<String> urls = getLargeGuardianDataset(fromDate, toDate, section, pageSize);
-        System.out.println("\n📊 Crawling Dataset:");
-        System.out.println("   Total URLs to crawl: " + urls.size());
-        System.out.println("   Expected articles: " + (urls.size() * pageSize));
-        System.out.println("   Date range: " + fromDate + " to " + toDate);
-        if (section != null) {
-            System.out.println("   Section filter: " + section);
-        }
-        
-        // Start background thread failure simulation
-        Thread failureSimulator = new Thread(() -> {
-            try {
-                Thread.sleep(2000); // Wait only 2 seconds before starting failures
-                
-                String[] failureTypes = {"runtime-exception", "thread-death"};
-                int failureCount = 0;
-                
-                while (!Thread.currentThread().isInterrupted()) {
-                    Thread.sleep(failureInterval * 1000);
-                    
-                    String failureType = failureTypes[failureCount % failureTypes.length];
-                    int threadsToKill = 2 + (failureCount % 3); // 2-4 threads
-                    
-                    System.out.println("\n💥 INJECTING FAILURE #" + (failureCount + 1) + 
-                                     " - Type: " + failureType + 
-                                     ", Threads: " + threadsToKill);
-                    
-                    crawler.simulateThreadFailures(failureType, threadsToKill);
-                    
-                    // Show thread pool state after failure
-                    System.out.println("📊 Thread pool state after failure injection:");
-                    crawler.printThreadPoolStats();
-                    
-                    failureCount++;
-                    
-                    if (failureCount >= 5) { // Limit to 5 failure injections
-                        System.out.println("\n✅ Completed maximum failure injections");
-                        break;
-                    }
-                }
-            } catch (InterruptedException e) {
-                System.out.println("🛑 Failure simulation stopped");
-            }
-        });
-        
-        failureSimulator.setDaemon(true);
-        failureSimulator.start();
-        
-        // Inject initial failures immediately to demonstrate thread death logging
-        System.out.println("\n💥 INJECTING INITIAL THREAD FAILURES");
-        System.out.println("========================================");
-        crawler.simulateThreadFailures("runtime-exception", 3);
-        
-        // Brief pause to let failures take effect
-        try {
-            Thread.sleep(3000);
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-        }
-        
-        // Start the actual crawling
-        long startTime = System.currentTimeMillis();
-        System.out.println("\n🕷️  Starting crawl at: " + new java.util.Date());
-        
-        try {
-            CompletableFuture<Map<String, CrawlResult>> future = crawler.crawlAsync(urls);
-            
-            // Monitor progress while crawling
-            Thread progressMonitor = new Thread(() -> {
-                try {
-                    while (!future.isDone()) {
-                        Thread.sleep(5000); // Every 5 seconds
-                        System.out.println("⏳ Crawling in progress... Thread pool stats:");
-                        crawler.printThreadPoolStats();
-                    }
-                } catch (InterruptedException e) {
-                    // Monitor stopped
-                }
-            });
-            progressMonitor.setDaemon(true);
-            progressMonitor.start();
-            
-            // Wait for crawling to complete
-            Map<String, CrawlResult> results = future.get();
-            
-            // Stop the failure simulator
-            failureSimulator.interrupt();
-            progressMonitor.interrupt();
-            
-            long endTime = System.currentTimeMillis();
-            long duration = endTime - startTime;
-            
-            // Analyze results
-            System.out.println("\n🎉 CRAWLING COMPLETED!");
-            System.out.println("====================");
-            System.out.println("⏱️  Total time: " + (duration / 1000.0) + " seconds");
-            System.out.println("📊 Results analysis:");
-            
-            int successfulCrawls = 0;
-            int totalArticles = 0;
-            int failedCrawls = 0;
-            
-            for (Map.Entry<String, CrawlResult> entry : results.entrySet()) {
-                CrawlResult result = entry.getValue();
-                if (result.isSuccessful()) {
-                    successfulCrawls++;
-                    // Count articles from Guardian API response
-                    if (result.getData() != null) {
-                        totalArticles += countArticlesInResult(result);
-                    }
-                } else {
-                    failedCrawls++;
-                    System.out.println("❌ Failed URL: " + entry.getKey() + " - " + result.getErrorMessage());
-                }
-            }
-            
-            System.out.println("   ✅ Successful crawls: " + successfulCrawls + "/" + urls.size());
-            System.out.println("   ❌ Failed crawls: " + failedCrawls);
-            System.out.println("   📰 Total articles retrieved: " + totalArticles);
-            System.out.println("   📈 Success rate: " + String.format("%.1f%%", (successfulCrawls * 100.0 / urls.size())));
-            
-            // Show final thread pool state
-            System.out.println("\n📋 Final thread pool state:");
-            crawler.printThreadPoolStats();
-            
-            // Save the combined results
-            if (successfulCrawls > 0) {
-                CrawlResult combinedResult = combinePaginatedResults(results, urls, fromDate, toDate, section, pageSize);
-                storage.save(combinedResult);
-                
-                System.out.println("\n💾 Data saved to output directory");
-                System.out.println("📊 Final dataset contains " + countArticlesInResult(combinedResult) + " articles");
-                
-                // Show some sample data
-                showGuardianNewsData(combinedResult);
-            }
-            
-            System.out.println("\n🏆 DEMO CONCLUSION:");
-            System.out.println("===================");
-            System.out.println("✅ Successfully demonstrated fault tolerance during real API crawling");
-            System.out.println("✅ Thread failures were injected but auto-recovery maintained operation");
-            System.out.println("✅ Data integrity was preserved despite multiple thread deaths");
-            System.out.println("✅ Final dataset is complete with " + totalArticles + " articles");
-            
-        } catch (Exception e) {
-            failureSimulator.interrupt();
-            logger.error("Error during crawl with failures demo", e);
-            System.err.println("❌ Demo failed: " + e.getMessage());
-        }
-    }
-    
-    /**
-     * Create a larger dataset for comprehensive testing
-     */
-    private static List<String> getLargeGuardianDataset(String fromDate, String toDate, String section, int pageSize) {
-        List<String> urls = new ArrayList<>();
-        
-        // Use smaller page sizes but more requests to create more concurrent work
-        int actualPageSize = Math.min(pageSize, 100); // Limit to 100 per request for more articles while maintaining parallelism
-        
-        // Create multiple date ranges to increase URL count
-        try {
-            java.time.LocalDate start = java.time.LocalDate.parse(fromDate);
-            java.time.LocalDate end = java.time.LocalDate.parse(toDate);
-            
-            // Split into weekly chunks for more URLs
-            java.time.LocalDate current = start;
-            while (current.isBefore(end)) {
-                java.time.LocalDate weekEnd = current.plusWeeks(1);
-                if (weekEnd.isAfter(end)) {
-                    weekEnd = end;
-                }
-                
-                String weekFromDate = current.toString();
-                String weekToDate = weekEnd.toString();
-                
-                // Create multiple page requests for each week
-                for (int page = 1; page <= 20; page++) { // Up to 20 pages per week (for more articles)
-                    StringBuilder urlBuilder = new StringBuilder();
-                    urlBuilder.append("https://content.guardianapis.com/search?api-key=test");
-                    urlBuilder.append("&from-date=").append(weekFromDate);
-                    urlBuilder.append("&to-date=").append(weekToDate);
-                    urlBuilder.append("&page-size=").append(actualPageSize);
-                    urlBuilder.append("&page=").append(page);
-                    urlBuilder.append("&show-fields=headline,byline,body");
-                    urlBuilder.append("&show-tags=keyword");
-                    
-                    if (section != null && !section.trim().isEmpty()) {
-                        urlBuilder.append("&section=").append(section);
-                    }
-                    
-                    urls.add(urlBuilder.toString());
-                }
-                
-                current = weekEnd;
-            }
-            
-        } catch (Exception e) {
-            logger.warn("Error creating date ranges, using simple approach", e);
-            // Fallback to original method
-            return getGuardianUrls(fromDate, toDate, section, pageSize);
-        }
-        
-        return urls;
-    }
-    
-    /**
-     * Count articles in a Guardian API CrawlResult
-     */
-    private static int countArticlesInResult(CrawlResult result) {
-        try {
-            Map<String, Object> data = result.getData();
-            if (data == null) return 0;
-            
-            // Try direct response structure first
-            if (data.containsKey("response")) {
-                Map<String, Object> response = (Map<String, Object>) data.get("response");
-                if (response.containsKey("results")) {
-                    List<?> results = (List<?>) response.get("results");
-                    return results.size();
-                }
-            }
-            
-            // Try nested structure (data -> {url} -> response -> results)
-            for (Map.Entry<String, Object> entry : data.entrySet()) {
-                Object responseObj = entry.getValue();
-                if (responseObj instanceof Map) {
-                    Map<String, Object> responseMap = (Map<String, Object>) responseObj;
-                    if (responseMap.containsKey("response")) {
-                        Map<String, Object> apiResponse = (Map<String, Object>) responseMap.get("response");
-                        if (apiResponse.containsKey("results")) {
-                            List<?> results = (List<?>) apiResponse.get("results");
-                            return results.size();
-                        }
-                    }
-                }
-            }
-            
-            return 0;
-        } catch (Exception e) {
-            logger.warn("Error counting articles in result: {}", e.getMessage());
-            return 0;
-        }
-    }
-    
-    /**
-     * Test logging system to diagnose differences between devices
-     */
-    private static void testLoggingDifferences() {
-        System.out.println("=".repeat(60));
-        System.out.println("LOGGING DIAGNOSTIC TEST");
-        System.out.println("=".repeat(60));
-        
-        // System information
-        System.out.println("\n1. SYSTEM INFORMATION:");
-        System.out.println("   Java Version: " + System.getProperty("java.version"));
-        System.out.println("   Java Vendor: " + System.getProperty("java.vendor"));
-        System.out.println("   OS Name: " + System.getProperty("os.name"));
-        System.out.println("   OS Version: " + System.getProperty("os.version"));
-        System.out.println("   User Home: " + System.getProperty("user.home"));
-        System.out.println("   Working Directory: " + System.getProperty("user.dir"));
-        System.out.println("   File Encoding: " + System.getProperty("file.encoding"));
-        System.out.println("   Default Charset: " + java.nio.charset.Charset.defaultCharset());
-        
-        // Test character support
-        System.out.println("\n2. CHARACTER ENCODING TEST:");
-        System.out.println("   Basic ASCII: OK");
-        System.out.println("   Unicode Test: ✅ 🔥 💀 ⚠️ 📊");
-        System.out.println("   Emoji Support: " + (System.console() != null ? "Console detected" : "No console"));
-        
-        // Test logging levels
-        System.out.println("\n3. LOGGING LEVEL TEST:");
-        logger.error("ERROR level test - should appear in red/bold");
-        logger.warn("WARN level test - should appear in yellow/bold");
-        logger.info("INFO level test - normal appearance");
-        logger.debug("DEBUG level test - might not appear");
-        
-        // Test file logging
-        System.out.println("\n4. FILE LOGGING TEST:");
-        File logsDir = new File("logs");
-        File logFile = new File("logs/crawler.log");
-        System.out.println("   Logs directory exists: " + logsDir.exists());
-        System.out.println("   Logs directory path: " + logsDir.getAbsolutePath());
-        System.out.println("   Log file exists: " + logFile.exists());
-        System.out.println("   Log file path: " + logFile.getAbsolutePath());
-        System.out.println("   Log file readable: " + logFile.canRead());
-        System.out.println("   Log file writable: " + logFile.canWrite());
-        System.out.println("   Log file size: " + (logFile.exists() ? logFile.length() + " bytes" : "N/A"));
-        
-        // Force log a test message
-        logger.info("🧪 DIAGNOSTIC TEST MESSAGE - Check if this appears in logs/crawler.log");
-        System.out.println("   Test message logged - check logs/crawler.log for this message");
-        
-        System.out.println("\n5. RECOMMENDATIONS:");
-        if (!logsDir.exists()) {
-            System.out.println("   ❌ Create logs directory: mkdir logs");
-        }
-        if (!logFile.canWrite()) {
-            System.out.println("   ❌ Fix write permissions: chmod 755 logs/");
-        }
-        System.out.println("   💡 Try running: tail -f logs/crawler.log (to watch live logs)");
-        System.out.println("   💡 Compare this output across devices to identify differences");
-        
-        System.out.println("\n" + "=".repeat(60));
-    }
-
-    /**
-     * Ensure logs directory exists with proper permissions
-     */
-    private static void ensureLogsDirectoryExists() {
-        try {
-            File logsDir = new File("logs");
-            if (!logsDir.exists()) {
-                boolean created = logsDir.mkdirs();
-                System.out.println("📁 Created logs directory: " + created);
-                if (created) {
-                    System.out.println("✅ Logs directory created at: " + logsDir.getAbsolutePath());
-                } else {
-                    System.err.println("❌ Failed to create logs directory");
-                }
-            } else {
-                System.out.println("✅ Logs directory already exists: " + logsDir.getAbsolutePath());
-            }
-            
-            // Test write permissions
-            File testFile = new File(logsDir, "test_write.tmp");
-            try {
-                boolean canWrite = testFile.createNewFile();
-                if (canWrite) {
-                    testFile.delete(); // Clean up
-                    System.out.println("✅ Logs directory is writable");
-                } else {
-                    System.err.println("❌ Cannot write to logs directory");
-                }
-            } catch (Exception e) {
-                System.err.println("❌ Write test failed: " + e.getMessage());
-            }
-        } catch (Exception e) {
-            System.err.println("❌ Error setting up logs directory: " + e.getMessage());
-        }
-    }
-
-    /**
-     * Test basic logging functionality
-     */
-    private static void testBasicLogging() {
-        System.out.println("🧪 Testing basic logging functionality...");
-        
-        // Test different log levels
-        logger.info("✅ INFO level logging test");
-        logger.warn("⚠️ WARN level logging test");
-        logger.error("❌ ERROR level logging test");
-        
-        // Test with emoji/unicode
-        logger.info("🔥 Unicode/Emoji logging test: ✅ 📊 💀 ⚡");
-        
-        // Test logging current time and system info
-        logger.info("System: {} {} on {}", 
-                   System.getProperty("java.version"),
-                   System.getProperty("java.vendor"),
-                   System.getProperty("os.name"));
-        
-        System.out.println("✅ Basic logging test completed - check logs/crawler.log");
     }
 } 
