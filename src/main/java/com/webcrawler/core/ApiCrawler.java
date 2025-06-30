@@ -914,7 +914,8 @@ public class ApiCrawler {
         this.failureSimulationEnabled = true;
         this.failureIntervalSeconds = intervalSeconds;
         this.failureThreadCount = threadsToKill;
-        this.lastFailureTime.set(System.currentTimeMillis());
+        // Set to 0 so the first failure check will trigger immediately after the interval
+        this.lastFailureTime.set(0);
         logger.info("🔥 Thread failure simulation enabled: {} second intervals, {} threads per failure", 
                    intervalSeconds, threadsToKill);
     }
@@ -932,14 +933,15 @@ public class ApiCrawler {
         
         if (timeSinceLastFailure >= (failureIntervalSeconds * 1000)) {
             logger.warn("🔥 SIMULATION: Time for thread failure simulation!");
+            System.out.println("🔥 SIMULATION: Triggering thread failures...");
+            System.out.flush();
             
-            // Only simulate failures if we have active work to avoid interrupting final stages
-            if (executorService.getActiveCount() > 0 || processingPool.getActiveThreadCount() > 0) {
-                simulateRuntimeExceptionFailures(failureThreadCount);
-                lastFailureTime.set(currentTime);
-            } else {
-                logger.info("🔥 SIMULATION: Skipping failure - no active work to interrupt");
-            }
+            // Simulate failures regardless of active work - we want to test recovery
+            simulateRuntimeExceptionFailures(failureThreadCount);
+            lastFailureTime.set(currentTime);
+            
+            logger.warn("🔥 SIMULATION: Thread failure command issued after {} seconds", 
+                       timeSinceLastFailure / 1000);
         }
     }
     
@@ -957,35 +959,47 @@ public class ApiCrawler {
         
         logger.warn("🔥 SIMULATION: Will kill {} coordination threads and {} processing threads", 
                    coordinationFailures, processingFailures);
+        System.out.println("🔥 SIMULATION TARGET: " + coordinationFailures + " coordination + " + processingFailures + " processing threads");
+        System.out.flush();
         
         // Target coordination pool (executorService) - more immediate
         for (int i = 0; i < coordinationFailures; i++) {
             final int threadId = i;
-            executorService.submit(() -> {
-                String threadName = Thread.currentThread().getName();
-                logger.error("💀 COORDINATION THREAD DEATH: {} (ID: {}) is being killed NOW!", threadName, threadId);
-                System.out.println("💀 KILLING COORDINATION THREAD: " + threadName);
-                System.out.flush();
-                
-                throw new RuntimeException("SIMULATION: Intentional coordination thread failure #" + threadId + " in " + threadName);
-            });
+            try {
+                executorService.submit(() -> {
+                    String threadName = Thread.currentThread().getName();
+                    logger.error("💀 COORDINATION THREAD DEATH: {} (ID: {}) is being killed NOW!", threadName, threadId);
+                    System.out.println("💀 KILLING COORDINATION THREAD: " + threadName);
+                    System.out.flush();
+                    
+                    throw new RuntimeException("SIMULATION: Intentional coordination thread failure #" + threadId + " in " + threadName);
+                });
+                System.out.println("✅ SUBMITTED: Coordination thread kill task #" + threadId);
+            } catch (Exception e) {
+                System.out.println("❌ FAILED to submit coordination thread kill task #" + threadId + ": " + e.getMessage());
+            }
         }
         
         // Target processing pool - also immediate
         for (int i = 0; i < processingFailures; i++) {
             final int threadId = coordinationFailures + i;
-            processingPool.submit(() -> {
-                String threadName = Thread.currentThread().getName();
-                logger.error("💀 PROCESSING THREAD DEATH: {} (ID: {}) is being killed NOW!", threadName, threadId);
-                System.out.println("💀 KILLING PROCESSING THREAD: " + threadName);
-                System.out.flush();
-                
-                throw new RuntimeException("SIMULATION: Intentional processing thread failure #" + threadId + " in " + threadName);
-            });
+            try {
+                processingPool.submit(() -> {
+                    String threadName = Thread.currentThread().getName();
+                    logger.error("💀 PROCESSING THREAD DEATH: {} (ID: {}) is being killed NOW!", threadName, threadId);
+                    System.out.println("💀 KILLING PROCESSING THREAD: " + threadName);
+                    System.out.flush();
+                    
+                    throw new RuntimeException("SIMULATION: Intentional processing thread failure #" + threadId + " in " + threadName);
+                });
+                System.out.println("✅ SUBMITTED: Processing thread kill task #" + threadId);
+            } catch (Exception e) {
+                System.out.println("❌ FAILED to submit processing thread kill task #" + threadId + ": " + e.getMessage());
+            }
         }
         
         logger.warn("🔥 SIMULATION: {} thread kill commands submitted. Recovery monitoring active...", numberOfThreads);
-        System.out.println("🔥 SIMULATION: Thread kill commands submitted. Watch for recovery messages...");
+        System.out.println("🔥 SIMULATION: " + numberOfThreads + " thread kill commands submitted. Watch for recovery messages...");
         System.out.flush();
     }
     
