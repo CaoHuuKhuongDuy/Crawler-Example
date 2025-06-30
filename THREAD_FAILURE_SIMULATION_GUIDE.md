@@ -1,217 +1,178 @@
-# Thread Failure Simulation & Auto-Recovery Guide
+# Thread Failure Simulation Guide
 
-Simple guide showing how a Java web crawler automatically recovers from thread failures while maintaining data integrity.
+A simple step-by-step guide to test the Guardian News Crawler in **Normal Mode** vs **Thread Failure Mode** to demonstrate automatic thread recovery.
 
 ## Prerequisites
 - **Java 17+**
 - **Maven 3.6+**
 
-## Build & Run
+---
 
-### 1. Build the Project
+## Step 1: Build the Project
+
 ```bash
 mvn clean compile
 ```
 
-### 2. Run Thread Failure Demo (Crawls 5000+ Articles)
+---
+
+## Step 2: Run Normal Mode (~1000 Articles)
+
+**What it does:** Crawls Guardian News API without any thread failures.
+
 ```bash
-# Original demo (2000 articles in 1 week)
-mvn exec:java -Dexec.args="--demo-crawl-with-failures --from 2024-01-01 --to 2024-01-07 --threads 10 --failure-interval 8"
-
-# Extended demo for 5000+ articles (3 weeks)
-mvn exec:java -Dexec.args="--demo-crawl-with-failures --from 2024-01-01 --to 2024-01-21 --threads 10 --failure-interval 8"
-
-# Large dataset demo (3 months, 20,000+ articles)
-mvn exec:java -Dexec.args="--demo-crawl-with-failures --from 2024-01-01 --to 2024-04-01 --threads 15 --failure-interval 5"
+mvn exec:java -Dexec.args="--examples --from 2024-01-01 --to 2024-01-31 --page-size 1000 --threads 10"
 ```
 
-**What this does:**
-- Crawls Guardian News API for the specified date range
-- Uses multi-threaded concurrent processing  
-- Injects thread failures at specified intervals
-- Automatically recovers and continues crawling
-- **New capacity**: ~2000 articles per week (100 articles × 20 pages)
+**Expected Result:**
+- ✅ All 5 URL requests successful (5/5)
+- ✅ All 1000 articles retrieved
+- ✅ No thread deaths or recovery events
+- ✅ Pool size stays healthy: 10/10 threads
 
-## Key Code Segments
+---
 
-### Thread Death Simulation Code
+## Step 3: Run Thread Failure Mode (~1000 Articles)
 
-**Location:** `src/main/java/com/webcrawler/core/ApiCrawler.java` (Lines 1136-1205)
+**What it does:** Same crawling but **deliberately kills threads** every 5 seconds to test recovery.
+
+```bash
+mvn exec:java -Dexec.args="--demo-crawl-with-failures --from 2024-01-01 --to 2024-01-31 --page-size 1000 --threads 10 --failure-interval 5 --failure-threads 2"
+```
+
+**What happens:**
+- 🔥 Every 5 seconds: 2 threads are intentionally killed
+- 🚨 System detects thread death
+- 🔄 Automatic recovery creates replacement threads
+- ✅ Crawling continues despite failures
+
+---
+
+## Step 4: Expected Results Comparison
+
+### Normal Mode Output:
+```
+🎯 Enhanced batch crawl completed: 5/5 URLs successful
+📄 Retrieved 1000 articles out of 1000 total available
+✅ Thread Pool Healthy: 10/10 threads
+📊 Final Thread Pool Stats: {poolSize=10, threadsReplaced=0}
+```
+
+### Thread Failure Mode Output:
+```
+💀 THREAD FAILURE SIMULATION: Killing 2 threads...
+💀 SIMULATED THREAD DEATH: robust-crawler-thread-3 - SIMULATION: Intentional thread failure
+🚨 THREAD POOL DEGRADED: Pool size (8) below core (10). RECOVERY STARTING!
+🔄 RECOVERY COMPLETED: Restarted 2 threads. Pool now: 10/10
+✅ RECOVERY: Created 2 replacement threads
+
+🎯 Enhanced batch crawl completed: 5/5 URLs successful
+📄 Retrieved 1000 articles out of 1000 total available
+📊 Final Thread Pool Stats: {poolSize=10, threadsReplaced=4}
+```
+
+**Key Difference:** 
+- **Normal Mode:** `threadsReplaced=0` (no failures)
+- **Failure Mode:** `threadsReplaced=4` (threads died and were replaced)
+- **Same Result:** Both get all 1000 articles successfully!
+
+---
+
+## Step 5: Key Code Segments
+
+### A. Thread Failure Simulation Code
+**Location:** `src/main/java/com/webcrawler/core/ApiCrawler.java` (Line ~950)
 
 ```java
 /**
- * Simulate runtime exception failures - targets both coordination and processing pools
+ * Simulate runtime exception failures - targets both thread pools
  */
 private void simulateRuntimeExceptionFailures(int numberOfThreads) {
     logger.warn("🔥 SIMULATION: Starting RuntimeException failures in {} threads", numberOfThreads);
     
-    // Split failures between both thread pools
-    int coordinationFailures = Math.max(1, numberOfThreads / 2);
-    int processingFailures = numberOfThreads - coordinationFailures;
-    
-    // Target coordination pool (executorService)
+    // Kill coordination pool threads
     for (int i = 0; i < coordinationFailures; i++) {
-        final int threadId = i;
         executorService.submit(() -> {
-            try {
-                String threadName = Thread.currentThread().getName();
-                logger.warn("💀 THREAD DEATH: Coordination-Thread-{} ({}) about to throw RuntimeException", threadId, threadName);
-                Thread.sleep(1000);
-                
-                // Log the actual death
-                logger.error("☠️ THREAD KILLED: Coordination-Thread-{} ({}) throwing RuntimeException NOW", threadId, threadName);
-                
-                throw new RuntimeException("SIMULATION: Intentional coordination thread failure #" + threadId + " in " + threadName);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-            }
+            String threadName = Thread.currentThread().getName();
+            logger.error("💀 COORDINATION THREAD DEATH: {} is being killed NOW!", threadName);
+            throw new RuntimeException("SIMULATION: Intentional thread failure");
         });
     }
     
-    // Target processing pool (where actual crawling happens)
+    // Kill processing pool threads  
     for (int i = 0; i < processingFailures; i++) {
-        final int threadId = coordinationFailures + i;
         processingPool.submit(() -> {
-            try {
-                String threadName = Thread.currentThread().getName();
-                logger.warn("💀 THREAD DEATH: Processing-Thread-{} ({}) about to throw RuntimeException", threadId, threadName);
-                Thread.sleep(1000);
-                
-                // Log the actual death
-                logger.error("☠️ THREAD KILLED: Processing-Thread-{} ({}) throwing RuntimeException NOW", threadId, threadName);
-                
-                throw new RuntimeException("SIMULATION: Intentional processing thread failure #" + threadId + " in " + threadName);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-            }
+            String threadName = Thread.currentThread().getName();
+            logger.error("💀 PROCESSING THREAD DEATH: {} is being killed NOW!", threadName);
+            throw new RuntimeException("SIMULATION: Intentional thread failure");
         });
     }
 }
 ```
 
-### Thread Recovery Code
-
-**Location:** `src/main/java/com/webcrawler/core/ApiCrawler.java` (Lines 975-1040)
+### B. Thread Recovery Code
+**Location:** `src/main/java/com/webcrawler/core/ApiCrawler.java` (Line ~1134)
 
 ```java
 /**
- * Monitor thread pool health and take corrective action
+ * Monitor thread pool health and automatically recover
  */
 private void checkThreadPoolHealth() {
-    // Check both thread pools - coordination and processing
-    int activeThreads = executorService.getActiveCount();
     int poolSize = executorService.getPoolSize();
     int corePoolSize = executorService.getCorePoolSize();
     
-    // Processing pool stats (where actual work happens)
-    int processingPoolSize = processingPool.getPoolSize();
-    int processingActive = processingPool.getActiveThreadCount();
-    int processingParallelism = processingPool.getParallelism();
-    
-    boolean needsRecovery = false;
-    String recoveryReason = "";
-    
-    // Check coordination pool health
+    // Detect thread pool degradation
     if (poolSize < corePoolSize) {
-        needsRecovery = true;
-        recoveryReason += String.format("Coordination pool size (%d) below core (%d). ", poolSize, corePoolSize);
-    }
-    
-    // Check processing pool health (more critical for actual work)
-    if (processingActive == 0 && processingPoolSize < processingParallelism / 2) {
-        needsRecovery = true;
-        recoveryReason += String.format("Processing pool degraded (%d active, %d size, %d parallelism). ", 
-                                       processingActive, processingPoolSize, processingParallelism);
-    }
-    
-    if (needsRecovery) {
-        logger.warn("⚠️ Thread pool health issues detected: {}", recoveryReason);
-        System.out.println("*** THREAD RECOVERY TRIGGERED! ***");
-        System.out.println("Issues detected: " + recoveryReason);
+        logger.error("🚨 THREAD POOL DEGRADED: Pool size ({}) below core ({}). RECOVERY STARTING!", 
+                   poolSize, corePoolSize);
         
-        // Restart coordination threads
-        int startedCoordThreads = executorService.prestartAllCoreThreads();
+        // Automatically create replacement threads
+        int newThreads = executorService.prestartAllCoreThreads();
+        threadsReplaced.addAndGet(newThreads);
         
-        // For ForkJoinPool, stimulate with a new task to ensure active threads
-        if (processingActive == 0) {
-            processingPool.submit(() -> {
-                logger.info("🔄 Processing pool stimulation task completed");
-                return null;
-            });
-        }
-        
-        String recoveryMsg = String.format("Restarted %d coordination threads, stimulated processing pool", startedCoordThreads);
-        logger.info("🔄 Attempted thread pool recovery: {}", recoveryMsg);
-        System.out.println("SUCCESS: " + recoveryMsg);
-        
-        threadsReplaced.addAndGet(startedCoordThreads);
+        logger.warn("🔄 RECOVERY COMPLETED: Restarted {} threads. Pool now: {}/{}", 
+                   newThreads, executorService.getPoolSize(), corePoolSize);
     }
 }
 ```
 
-### Enhanced Thread Factory with Death Detection
-
-**Location:** `src/main/java/com/webcrawler/core/ApiCrawler.java` (Lines 932-958)
+### C. Thread Death Detection
+**Location:** `src/main/java/com/webcrawler/core/ApiCrawler.java` (Line ~1075)
 
 ```java
+/**
+ * Custom thread factory that detects when threads die
+ */
 private class RobustThreadFactory implements ThreadFactory {
-    private final AtomicInteger threadNumber = new AtomicInteger(1);
-    
     @Override
     public Thread newThread(Runnable runnable) {
-        Thread thread = new Thread(runnable, "robust-crawler-thread-" + threadNumber.getAndIncrement());
-        thread.setDaemon(false);
-        
-        // Add uncaught exception handler to log thread deaths
-        thread.setUncaughtExceptionHandler((t, e) -> {
-            logger.error("🚨 THREAD DEATH DETECTED: Thread {} died with uncaught exception: {}", 
-                       t.getName(), e.getClass().getSimpleName(), e);
-            System.out.println("🚨 THREAD DEATH DETECTED: Thread " + t.getName() + 
-                             " died with uncaught exception: " + e.getClass().getSimpleName());
-            threadsReplaced.incrementAndGet();
-            
-            if (e instanceof ThreadDeath) {
-                logger.error("💀 CONFIRMED THREAD KILL: {} terminated by ThreadDeath", t.getName());
-                System.out.println("💀 CONFIRMED THREAD KILL: " + t.getName() + " terminated by ThreadDeath");
-            } else if (e instanceof RuntimeException) {
-                logger.error("💥 CONFIRMED THREAD CRASH: {} crashed with RuntimeException: {}", t.getName(), e.getMessage());
-                System.out.println("💥 CONFIRMED THREAD CRASH: " + t.getName() + " crashed with RuntimeException: " + e.getMessage());
+        Thread thread = new Thread(() -> {
+            try {
+                runnable.run();
+            } catch (RuntimeException e) {
+                if (e.getMessage().contains("SIMULATION: Intentional")) {
+                    logger.error("💀 SIMULATED THREAD DEATH: {} - {}", threadName, e.getMessage());
+                    System.out.println("💀 THREAD DIED: " + threadName);
+                }
+                threadsReplaced.incrementAndGet();
+                throw e;
             }
-        });
+        }, "robust-crawler-thread-" + threadNumber.getAndIncrement());
         
         return thread;
     }
 }
 ```
 
-## Expected Output
+---
 
-When you run the demo command, you'll see:
+## Summary
 
-### 1. Thread Failures
-```
-💀 THREAD DEATH: Coordination-Thread-0 (robust-crawler-thread-1) about to throw RuntimeException
-💀 THREAD DEATH: Processing-Thread-1 (ForkJoinPool-1-worker-1) about to throw RuntimeException
-☠️ THREAD KILLED: Coordination-Thread-0 (robust-crawler-thread-1) throwing RuntimeException NOW
-☠️ THREAD KILLED: Processing-Thread-1 (ForkJoinPool-1-worker-1) throwing RuntimeException NOW
-💥 THREAD DEAD: Coordination-Thread-0 died from RuntimeException
-```
+**What This Demonstrates:**
+1. **Normal Mode:** Shows baseline performance without failures
+2. **Failure Mode:** Shows the system can handle thread deaths gracefully
+3. **Auto-Recovery:** Threads are automatically replaced when they die
+4. **Data Integrity:** Both modes retrieve the same 1000 articles successfully
 
-### 2. Auto-Recovery
-```
-*** THREAD RECOVERY TRIGGERED! ***
-Issues detected: Coordination pool size (1) below core (10)
-SUCCESS: Restarted 9 coordination threads, stimulated processing pool
-```
-
-### 3. Final Results
-```
-🎉 CRAWLING COMPLETED!
-   ✅ Successful crawls: 20/20
-   📰 Total articles retrieved: 2000+ (1 week) | 6000+ (3 weeks) | 20000+ (3 months)
-   📈 Success rate: 100.0%
-   🔄 Threads replaced: 9
-   ✅ Final dataset is complete despite multiple thread deaths
-```
-
-**Key Achievement:** 100% success rate and complete data integrity despite multiple thread deaths! 
+**The Key Achievement:** 
+🎯 **100% success rate in both modes** - proving the crawler is fault-tolerant and maintains data integrity even when threads die during operation. 

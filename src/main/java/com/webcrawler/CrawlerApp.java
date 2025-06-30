@@ -60,10 +60,24 @@ public class CrawlerApp {
             String section = cmd.getOptionValue("section", null);
             int pageSize = Integer.parseInt(cmd.getOptionValue("page-size", "200"));
             
+            // Thread failure simulation configuration
+            boolean enableFailureSimulation = cmd.hasOption("demo-crawl-with-failures");
+            int failureIntervalSeconds = Integer.parseInt(cmd.getOptionValue("failure-interval", "5"));
+            int failureThreadCount = Integer.parseInt(cmd.getOptionValue("failure-threads", "2"));
+            
             // Initialize crawler and storage with advanced options
             ApiCrawler crawler = new ApiCrawler(threadPoolSize, rateLimitMs, maxRetries, baseRetryDelayMs, 
                                                backoffMultiplier, enableHttp2, enableConcurrentProcessing, maxConnections);
             crawler.setUserAgent(userAgent);
+            
+            // Configure failure simulation if enabled
+            if (enableFailureSimulation) {
+                crawler.enableFailureSimulation(failureIntervalSeconds, failureThreadCount);
+                System.out.println("🔥 Thread Failure Simulation:");
+                System.out.println("   Failure interval: " + failureIntervalSeconds + " seconds");
+                System.out.println("   Threads per failure: " + failureThreadCount);
+                System.out.println("   Simulation: ENABLED");
+            }
             
             // Show configuration
             System.out.println("🔧 Crawler Configuration:");
@@ -90,6 +104,13 @@ public class CrawlerApp {
                 // Crawl single URL
                 String url = cmd.getOptionValue("url");
                 crawlSingleUrl(crawler, storage, url);
+            } else if (cmd.hasOption("demo-crawl-with-failures")) {
+                // Run Guardian news crawl with thread failure simulation
+                System.out.println("🔥 THREAD FAILURE SIMULATION MODE ENABLED");
+                System.out.println("   Failure Interval: " + failureIntervalSeconds + " seconds");
+                System.out.println("   Threads to Kill: " + failureThreadCount + " per failure event");
+                System.out.println();
+                runGuardianNewsCrawlWithFailures(crawler, storage, fromDate, toDate, section, pageSize);
             } else if (cmd.hasOption("examples")) {
                 // Run Guardian news crawl (like SimpleCrawler but with advanced features)
                 runGuardianNewsCrawl(crawler, storage, fromDate, toDate, section, pageSize);
@@ -102,6 +123,7 @@ public class CrawlerApp {
                 System.out.println("==============================================");
                 System.out.println("Usage:");
                 System.out.println("  --examples                                   # Crawl Guardian news from June 2025 (default)");
+                System.out.println("  --demo-crawl-with-failures                  # Crawl with thread failure simulation");
                 System.out.println("  --url <URL>                                  # Crawl a single URL");
                 System.out.println("  --stats                                      # Show JSON file statistics");
                 System.out.println();
@@ -111,6 +133,11 @@ public class CrawlerApp {
                 System.out.println("  --section <name>                            # Filter by section (sport, business, world, etc.)");
                 System.out.println("  --page-size <N>                             # Articles per request (default: 200, >200 uses pagination)");
                 System.out.println();
+                System.out.println("Thread Failure Simulation:");
+                System.out.println("  --demo-crawl-with-failures                  # Enable failure simulation mode");
+                System.out.println("  --failure-interval <seconds>               # Seconds between failures (default: 10)");
+                System.out.println("  --failure-threads <N>                      # Threads to kill per failure (default: 2)");
+                System.out.println();
                 System.out.println("Advanced Features:");
                 System.out.println("  --threads <N>                                # Number of threads (default: 10)");
                 System.out.println("  --enable-http2 / --disable-http2            # HTTP/2 multiplexing control");
@@ -119,10 +146,14 @@ public class CrawlerApp {
                 System.out.println("  --max-retries <N>                           # Retry attempts (default: 3)");
                 System.out.println();
                 System.out.println("Examples:");
+                System.out.println("  # Normal mode (no thread failures)");
                 System.out.println("  mvn exec:java -Dexec.args=\"--examples --threads 20 --enable-http2\"");
                 System.out.println("  mvn exec:java -Dexec.args=\"--examples --from 2024-01-01 --to 2024-12-31\"");
                 System.out.println("  mvn exec:java -Dexec.args=\"--examples --section sport --page-size 50\"");
-                System.out.println("  mvn exec:java -Dexec.args=\"--examples --disable-http2\"  # HTTP/1.1 only");
+                System.out.println();
+                System.out.println("  # Thread failure simulation mode (~1000 articles)");
+                System.out.println("  mvn exec:java -Dexec.args=\"--demo-crawl-with-failures --from 2024-01-01 --to 2024-01-31 --threads 10 --failure-interval 8\"");
+                System.out.println("  mvn exec:java -Dexec.args=\"--demo-crawl-with-failures --from 2024-01-01 --to 2024-03-31 --threads 15 --failure-interval 5 --failure-threads 3\"");
                 System.out.println("  mvn exec:java -Dexec.args=\"--url https://content.guardianapis.com/search?api-key=test\"");
             }
             
@@ -195,6 +226,24 @@ public class CrawlerApp {
                 .longOpt("backoff-multiplier")
                 .hasArg()
                 .desc("Exponential backoff multiplier (default: 2.0)")
+                .build());
+                
+        // Thread failure simulation options
+        options.addOption(Option.builder()
+                .longOpt("demo-crawl-with-failures")
+                .desc("Run Guardian crawl with thread failure simulation")
+                .build());
+                
+        options.addOption(Option.builder()
+                .longOpt("failure-interval")
+                .hasArg()
+                .desc("Interval between thread failures in seconds (default: 10)")
+                .build());
+                
+        options.addOption(Option.builder()
+                .longOpt("failure-threads")
+                .hasArg()
+                .desc("Number of threads to kill per failure event (default: 2)")
                 .build());
                 
         // HTTP/2 and concurrency options
@@ -561,6 +610,95 @@ public class CrawlerApp {
         } catch (Exception e) {
             logger.debug("Error displaying Guardian news data for {}: {}", url, e.getMessage());
             System.out.println("📰 Guardian data available (parsing error)");
+        }
+    }
+    
+    /**
+     * Run Guardian news crawl with thread failure simulation for ~1000 articles
+     */
+    private static void runGuardianNewsCrawlWithFailures(ApiCrawler crawler, JsonFileStorage storage, 
+                                                        String fromDate, String toDate, String section, int pageSize) {
+        System.out.println("🕷️  Starting Guardian News Crawl with Thread Failure Simulation");
+        System.out.println("===============================================================");
+        System.out.println("📊 Configuration:");
+        System.out.println("   Date Range: " + fromDate + " to " + toDate);
+        System.out.println("   Section: " + (section != null ? section : "All sections"));
+        System.out.println("   Target: ~1000 articles with thread failures");
+        System.out.println("   🔥 Thread failures will occur during crawling");
+        System.out.println();
+        
+        // For ~1000 articles, we need a longer date range or larger page size
+        // Guardian API typically returns ~100-200 articles per week
+        List<String> urls = getGuardianUrls(fromDate, toDate, section, Math.max(pageSize, 1000));
+        
+        System.out.println("📊 Crawl Plan:");
+        System.out.println("   URLs to crawl: " + urls.size());
+        System.out.println("   Expected articles: ~" + (urls.size() * 200) + " (assuming 200 per request)");
+        System.out.println("   Thread failure simulation: ACTIVE");
+        System.out.println();
+        
+        try {
+            System.out.println("⚡ Starting crawl with thread failure simulation...");
+            long startTime = System.currentTimeMillis();
+            
+            // Show initial thread pool stats
+            Map<String, Object> initialStats = crawler.getThreadPoolStats();
+            System.out.println("📊 Initial Thread Pool Stats:");
+            System.out.println("   Active threads: " + initialStats.get("activeThreads"));
+            System.out.println("   Pool size: " + initialStats.get("poolSize"));
+            System.out.println("   Completed tasks: " + initialStats.get("completedTaskCount"));
+            System.out.println();
+            
+            // Use async crawling for better parallelism and failure visibility
+            CompletableFuture<Map<String, CrawlResult>> crawlFuture = crawler.crawlAsync(urls);
+            Map<String, CrawlResult> results = crawlFuture.get();
+            
+            long duration = System.currentTimeMillis() - startTime;
+            
+            // Show final thread pool stats
+            Map<String, Object> finalStats = crawler.getThreadPoolStats();
+            System.out.println();
+            System.out.println("📊 Final Thread Pool Stats:");
+            System.out.println("   Active threads: " + finalStats.get("activeThreads"));
+            System.out.println("   Pool size: " + finalStats.get("poolSize"));
+            System.out.println("   Completed tasks: " + finalStats.get("completedTaskCount"));
+            System.out.println("   Threads replaced: " + finalStats.get("threadsReplaced"));
+            System.out.println();
+            
+            // Process and combine results (same as normal mode)
+            CrawlResult combinedResult = combinePaginatedResults(results, urls, fromDate, toDate, section, pageSize);
+            
+            // Display results with thread failure context
+            System.out.println("🎯 THREAD FAILURE SIMULATION RESULTS:");
+            System.out.println("=====================================");
+            System.out.printf("⏱️  Total duration: %.2f seconds%n", duration / 1000.0);
+            System.out.printf("📊 URLs processed: %d/%d%n", results.size(), urls.size());
+            
+            int successfulCrawls = (int) results.values().stream().mapToLong(r -> r.isSuccessful() ? 1 : 0).sum();
+            System.out.printf("✅ Successful crawls: %d/%d (%.1f%%)%n", 
+                            successfulCrawls, results.size(),
+                            ((double) successfulCrawls / results.size()) * 100);
+            
+            if (combinedResult.isSuccessful() && combinedResult.getData() != null) {
+                showGuardianNewsData(combinedResult);
+                
+                // Save the data
+                String filename = String.format("guardian_news_with_failures_%s_to_%s.json", fromDate, toDate);
+                storage.save(combinedResult);
+                
+                System.out.println();
+                System.out.println("✅ THREAD FAILURE SIMULATION COMPLETED SUCCESSFULLY!");
+                System.out.println("📄 Data saved to: " + storage.getOutputDirectory());
+                System.out.println("🔥 Despite thread failures, the system recovered and completed the crawl!");
+                System.out.println("🎯 This demonstrates the crawler's fault tolerance and auto-recovery capabilities.");
+            } else {
+                System.err.println("❌ Thread failure simulation completed but with errors");
+                System.err.println("Error: " + combinedResult.getErrorMessage());
+            }
+            
+        } catch (Exception e) {
+            System.err.println("❌ Thread failure simulation encountered an error: " + e.getMessage());
+            e.printStackTrace();
         }
     }
     
