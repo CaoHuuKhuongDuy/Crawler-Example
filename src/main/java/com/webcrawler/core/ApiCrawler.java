@@ -1156,7 +1156,7 @@ public class ApiCrawler {
             } catch (Exception e) {
                 logger.error("Error in thread pool monitoring: {}", e.getMessage());
             }
-        }, 5, 10, TimeUnit.SECONDS); // Check every 10 seconds, start after 5 seconds
+        }, 1, 1, TimeUnit.SECONDS); // Check every 10 seconds, start after 5 seconds
     }
     
     /**
